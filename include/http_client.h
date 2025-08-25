@@ -33,17 +33,6 @@ typedef enum {
 } http_method_t;
 
 /**
- * @brief Initialize global HTTP client (call once at startup)
- * @return 0 on success, -1 on failure
- */
-int http_client_global_init(void);
-
-/**
- * @brief Cleanup global HTTP client (call once at shutdown)
- */
-void http_client_global_cleanup(void);
-
-/**
  * @brief Create HTTP client (call once at startup)
  *
  * @return int 0 on success, -1 on failure

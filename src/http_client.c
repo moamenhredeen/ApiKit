@@ -35,17 +35,12 @@ static size_t header_callback(void *contents, size_t size, size_t nmemb, http_re
     return realsize;
 }
 
-// Global initialization
-int http_client_global_init(void) {
-    return curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK ? 0 : -1;
-}
-
-void http_client_global_cleanup(void) {
-    curl_global_cleanup();
-}
-
 // Instance management
 http_client_t *http_client_create(void) {
+    // TODO: handle error gracefully (what should we do if we can not init curl)
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+        return NULL;
+    }
     http_client_t *client = malloc(sizeof(http_client_t));
     if (!client) {
         return NULL;
@@ -71,6 +66,7 @@ void http_client_destroy(http_client_t *client) {
         curl_easy_cleanup(client->curl);
     }
     free(client);
+    curl_global_cleanup();
 }
 
 // Request handling

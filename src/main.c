@@ -527,6 +527,7 @@ static void save_settings(void) {
     }
 }
 
+// TODO: move settings loading and saving to a seperate file
 static void load_settings(void) {
     FILE *file = fopen("config.toml", "r");
     if (!file) return;
@@ -768,6 +769,7 @@ static void save_data(void) {
     }
 }
 
+// TODO: move data handling to a seperate file (same file as settings persisting file ?)
 static void load_data(void) {
     ensure_data_directory();
     
@@ -1259,16 +1261,9 @@ int main(int argc, char *argv[]) {
     // Load saved data
     load_data();
     
-    // Initialize HTTP client
-    if (http_client_global_init() != 0) {
-        printf("Failed to initialize HTTP client\n");
-        return -1;
-    }
-    
     http_client_t *client = http_client_create();
     if (!client) {
         printf("Failed to create HTTP client\n");
-        http_client_global_cleanup();
         return -1;
     }
     
@@ -1276,7 +1271,6 @@ int main(int argc, char *argv[]) {
     if (!glfwInit()) {
         printf("Failed to initialize GLFW\n");
         http_client_destroy(client);
-        http_client_global_cleanup();
         return -1;
     }
 
@@ -1294,7 +1288,6 @@ int main(int argc, char *argv[]) {
         printf("Failed to create GLFW window\n");
         glfwTerminate();
         http_client_destroy(client);
-        http_client_global_cleanup();
         return -1;
     }
 
@@ -1309,7 +1302,6 @@ int main(int argc, char *argv[]) {
         glfwDestroyWindow(window);
         glfwTerminate();
         http_client_destroy(client);
-        http_client_global_cleanup();
         return -1;
     }
 
@@ -1345,6 +1337,5 @@ int main(int argc, char *argv[]) {
     glfwDestroyWindow(window);
     glfwTerminate();
     http_client_destroy(client);
-    http_client_global_cleanup();
     return 0;
 }
