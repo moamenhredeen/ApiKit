@@ -10,7 +10,6 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <errno.h>
 #include <dirent.h>
 
 #define GL_SILENCE_DEPRECATION
