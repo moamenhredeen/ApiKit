@@ -31,7 +31,28 @@ set(THIRD_PARTY_SOURCES
 )
 
 # Create executable
-add_executable(apikit ${SOURCES} ${THIRD_PARTY_SOURCES})
+
+
+# Only on macOS: make it a bundle
+if(APPLE)
+    add_executable(apikit MACOSX_BUNDLE ${SOURCES} ${THIRD_PARTY_SOURCES})
+    set_target_properties(apikit PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "APIKIT"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "me.moamenhredeen.apikit"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+        #MACOSX_BUNDLE_ICON_FILE "icon.icns"
+    )
+
+    # Add resources only for macOS
+    # set_source_files_properties(${CMAKE_SOURCE_DIR}/resources/icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
+    # target_sources(MyApp PRIVATE ${CMAKE_SOURCE_DIR}/resources/icon.icns)
+else()
+    add_executable(apikit ${SOURCES} ${THIRD_PARTY_SOURCES})
+endif()
+
 
 # Include directories
 target_include_directories(apikit PRIVATE
