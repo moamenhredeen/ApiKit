@@ -1,0 +1,28 @@
+{
+	"history":	[],
+	"collections":	[{
+			"name":	"GET https://httpbin.org/get",
+			"method":	"GET",
+			"url":	"https://httpbin.org/get",
+			"headers":	"Content-Type: application/json\nAuthorization: Bearer your-token",
+			"body":	"{\n  \"message\": \"Hello from API Kit!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}"
+		}, {
+			"name":	"GET https://httpbin.org/getöalsdkföalsdkf",
+			"method":	"GET",
+			"url":	"https://httpbin.org/getöalsdkföalsdkf",
+			"headers":	"Content-Type: application/json\nAuthorization: Bearer your-token",
+			"body":	"{\n  \"message\": \"Hello from API Kit!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}"
+		}, {
+			"name":	"GET https://httpbin.org/getöalsdkföalsdkf",
+			"method":	"GET",
+			"url":	"https://httpbin.org/getöalsdkföalsdkf",
+			"headers":	"Content-Type: application/json\nAuthorization: Bearer your-token",
+			"body":	"{\n  \"message\": \"Hello from API Kit!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}"
+		}, {
+			"name":	"GET https://httpbin.org/getöalsdkföalsdkf",
+			"method":	"GET",
+			"url":	"https://httpbin.org/getöalsdkföalsdkf",
+			"headers":	"Content-Type: application/json\nAuthorization: Bearer your-token",
+			"body":	"{\n  \"message\": \"Hello from API Kit!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}"
+		}]
+}

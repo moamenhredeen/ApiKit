@@ -11,6 +11,11 @@
 #include "nuklear_glfw_gl3.h"
 
 #include "http_client.h"
+#include "cJSON.h"
+
+// Forward declarations
+void save_data();
+void load_data();
 
 // History item
 typedef struct {
@@ -82,6 +87,9 @@ void add_to_history(const char* method, const char* url, long status_code) {
         strftime(item->timestamp, sizeof(item->timestamp), "%H:%M:%S", tm_info);
         
         gui_state.history_count++;
+        
+        // Auto-save after adding to history
+        save_data();
     }
 }
 
@@ -94,7 +102,134 @@ void add_to_collection(const char* name, const char* method, const char* url, co
         strncpy(item->headers, headers, sizeof(item->headers) - 1);
         strncpy(item->body, body, sizeof(item->body) - 1);
         gui_state.collection_count++;
+        
+        // Auto-save after adding to collection
+        save_data();
     }
+}
+
+// Save data to JSON file
+void save_data() {
+    cJSON *root = cJSON_CreateObject();
+    
+    // Save history
+    cJSON *history_array = cJSON_CreateArray();
+    for (int i = 0; i < gui_state.history_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "method", gui_state.history[i].method);
+        cJSON_AddStringToObject(item, "url", gui_state.history[i].url);
+        cJSON_AddNumberToObject(item, "status_code", gui_state.history[i].status_code);
+        cJSON_AddStringToObject(item, "timestamp", gui_state.history[i].timestamp);
+        cJSON_AddItemToArray(history_array, item);
+    }
+    cJSON_AddItemToObject(root, "history", history_array);
+    
+    // Save collections
+    cJSON *collections_array = cJSON_CreateArray();
+    for (int i = 0; i < gui_state.collection_count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "name", gui_state.collections[i].name);
+        cJSON_AddStringToObject(item, "method", gui_state.collections[i].method);
+        cJSON_AddStringToObject(item, "url", gui_state.collections[i].url);
+        cJSON_AddStringToObject(item, "headers", gui_state.collections[i].headers);
+        cJSON_AddStringToObject(item, "body", gui_state.collections[i].body);
+        cJSON_AddItemToArray(collections_array, item);
+    }
+    cJSON_AddItemToObject(root, "collections", collections_array);
+    
+    // Write to file
+    char *json_string = cJSON_Print(root);
+    FILE *file = fopen("apikit_data.json", "w");
+    if (file) {
+        fprintf(file, "%s", json_string);
+        fclose(file);
+    }
+    
+    free(json_string);
+    cJSON_Delete(root);
+}
+
+// Load data from JSON file
+void load_data() {
+    FILE *file = fopen("apikit_data.json", "r");
+    if (!file) {
+        return; // File doesn't exist, that's ok
+    }
+    
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    // Read file content
+    char *json_string = malloc(length + 1);
+    fread(json_string, 1, length, file);
+    json_string[length] = '\0';
+    fclose(file);
+    
+    // Parse JSON
+    cJSON *root = cJSON_Parse(json_string);
+    if (!root) {
+        free(json_string);
+        return;
+    }
+    
+    // Load history
+    cJSON *history_array = cJSON_GetObjectItem(root, "history");
+    if (cJSON_IsArray(history_array)) {
+        gui_state.history_count = 0;
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, history_array) {
+            if (gui_state.history_count >= 100) break;
+            
+            cJSON *method = cJSON_GetObjectItem(item, "method");
+            cJSON *url = cJSON_GetObjectItem(item, "url");
+            cJSON *status_code = cJSON_GetObjectItem(item, "status_code");
+            cJSON *timestamp = cJSON_GetObjectItem(item, "timestamp");
+            
+            if (cJSON_IsString(method) && cJSON_IsString(url) && 
+                cJSON_IsNumber(status_code) && cJSON_IsString(timestamp)) {
+                
+                history_item_t* hist_item = &gui_state.history[gui_state.history_count];
+                strncpy(hist_item->method, method->valuestring, sizeof(hist_item->method) - 1);
+                strncpy(hist_item->url, url->valuestring, sizeof(hist_item->url) - 1);
+                hist_item->status_code = (long)status_code->valuedouble;
+                strncpy(hist_item->timestamp, timestamp->valuestring, sizeof(hist_item->timestamp) - 1);
+                gui_state.history_count++;
+            }
+        }
+    }
+    
+    // Load collections
+    cJSON *collections_array = cJSON_GetObjectItem(root, "collections");
+    if (cJSON_IsArray(collections_array)) {
+        gui_state.collection_count = 0;
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, collections_array) {
+            if (gui_state.collection_count >= 50) break;
+            
+            cJSON *name = cJSON_GetObjectItem(item, "name");
+            cJSON *method = cJSON_GetObjectItem(item, "method");
+            cJSON *url = cJSON_GetObjectItem(item, "url");
+            cJSON *headers = cJSON_GetObjectItem(item, "headers");
+            cJSON *body = cJSON_GetObjectItem(item, "body");
+            
+            if (cJSON_IsString(name) && cJSON_IsString(method) && cJSON_IsString(url) &&
+                cJSON_IsString(headers) && cJSON_IsString(body)) {
+                
+                collection_item_t* coll_item = &gui_state.collections[gui_state.collection_count];
+                strncpy(coll_item->name, name->valuestring, sizeof(coll_item->name) - 1);
+                strncpy(coll_item->method, method->valuestring, sizeof(coll_item->method) - 1);
+                strncpy(coll_item->url, url->valuestring, sizeof(coll_item->url) - 1);
+                strncpy(coll_item->headers, headers->valuestring, sizeof(coll_item->headers) - 1);
+                strncpy(coll_item->body, body->valuestring, sizeof(coll_item->body) - 1);
+                gui_state.collection_count++;
+            }
+        }
+    }
+    
+    free(json_string);
+    cJSON_Delete(root);
 }
 
 void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
@@ -366,6 +501,9 @@ void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
 }
 
 int main(int argc, char *argv[]) {
+    // Load saved data
+    load_data();
+    
     // Initialize HTTP client
     if (http_client_global_init() != 0) {
         printf("Failed to initialize HTTP client\n");
@@ -444,6 +582,9 @@ int main(int argc, char *argv[]) {
         glfwSwapBuffers(window);
     }
 
+    // Save data before exit
+    save_data();
+    
     // Cleanup
     nk_glfw3_shutdown(&glfw);
     glfwDestroyWindow(window);

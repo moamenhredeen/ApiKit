@@ -13,6 +13,7 @@ find_package(OpenGL REQUIRED)
 add_executable(apikit 
     main.c 
     http_client.c
+    cJSON.c
 )
 
 # Link libraries
