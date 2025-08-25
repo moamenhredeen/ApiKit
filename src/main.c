@@ -1319,21 +1319,19 @@ int main(int argc, char *argv[]) {
         glfwPollEvents();
         nk_glfw3_new_frame(&glfw);
         
-        // Draw GUI
         draw_ui(ctx, client);
         
-        // Render
-        int width, height;
+        int width = 0;
+        int height = 0;
         glfwGetFramebufferSize(window, &width, &height);
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT);
-        glClearColor(0.10f, 0.18f, 0.24f, 1.0f);
+        glClearColor(0.10F, 0.18F, 0.24F, 1.0F);
         
         nk_glfw3_render(&glfw, NK_ANTI_ALIASING_ON, 512 * 1024, 128 * 1024);
         glfwSwapBuffers(window);
     }
 
-    // Save data before exit
     save_data();
     
     // Cleanup
