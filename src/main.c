@@ -44,7 +44,7 @@ typedef struct {
     char url[512];
     long status_code;
     char timestamp[64];
-} HistoryItem;
+} history_item_t;
 
 // Individual HTTP request
 typedef struct {
@@ -53,23 +53,23 @@ typedef struct {
     char url[512];
     char headers[1024];
     char body[2048];
-} RequestItem;
+} request_item_t;
 
-// Collection of requests (tree node in GUI)
+// collection_t of requests (tree node in GUI)
 typedef struct {
     char name[128];
-    RequestItem requests[MAX_REQUESTS_PER_COLLECTION];
+    request_item_t requests[MAX_REQUESTS_PER_COLLECTION];
     int request_count;
     int expanded;
-} Collection;
+} collection_t;
 
-// Workspace containing collections
+// workspace_t containing collections
 typedef struct {
     char name[128];
     char filename[256];
-    Collection collections[MAX_COLLECTIONS_PER_WORKSPACE];
+    collection_t collections[MAX_COLLECTIONS_PER_WORKSPACE];
     int collection_count;
-} Workspace;
+} workspace_t;
 
 // Drag and drop state
 typedef struct {
@@ -78,21 +78,21 @@ typedef struct {
     int collection_index;
     int request_index;
     char preview[256];
-} DragState;
+} drag_state_t;
 
-// Selection state for operations
+// selection_t state for operations
 typedef struct {
     int type;  // 0 = none, 1 = collection, 2 = request
     int workspace_index;
     int collection_index;
     int request_index;
-} Selection;
+} selection_t;
 
 // Keyboard shortcut state
 typedef struct {
     int prev_ctrl_b_combo;
     int prev_ctrl_f_combo;
-} KeyboardState;
+} keyboard_state_t;
 
 // Application settings
 typedef struct {
@@ -102,7 +102,7 @@ typedef struct {
     int ctrl_b_enabled;
     int ctrl_f_enabled;
     int delete_key_enabled;
-} Settings;
+} settings_t;
 
 // Main application state
 typedef struct {
@@ -124,9 +124,9 @@ typedef struct {
     int url_has_focus;
     
     // Data
-    HistoryItem history[MAX_HISTORY_ITEMS];
+    history_item_t history[MAX_HISTORY_ITEMS];
     int history_count;
-    Workspace workspaces[MAX_WORKSPACES];
+    workspace_t workspaces[MAX_WORKSPACES];
     int workspace_count;
     int active_workspace;
     
@@ -137,17 +137,17 @@ typedef struct {
     int show_new_collection_popup;
     
     // Interactive state
-    DragState drag;
-    Selection selection;
-    KeyboardState keyboard;
-    Settings settings;
-} AppState;
+    drag_state_t drag;
+    selection_t selection;
+    keyboard_state_t keyboard;
+    settings_t settings;
+} app_state_t;
 
 /* ============================================================================
  * GLOBAL STATE
  * ============================================================================ */
 
-static AppState app_state = {
+static app_state_t app_state = {
     .url = "https://httpbin.org/get",
     .headers = "Content-Type: application/json\nAuthorization: Bearer your-token",
     .body = "{\n  \"message\": \"Hello from API Kit!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}",
@@ -206,7 +206,7 @@ static void ensure_data_directory(void);
 static void save_settings(void);
 static void load_settings(void);
 
-// Workspace management
+// workspace_t management
 static void ensure_default_workspace(void);
 static void scan_and_load_workspaces(void);
 static void extract_workspace_name(const char* filename, char* workspace_name, size_t max_len);
@@ -242,7 +242,7 @@ static void apply_theme(void);
 
 static void add_to_history(const char* method, const char* url, long status_code) {
     if (app_state.history_count < MAX_HISTORY_ITEMS) {
-        HistoryItem* item = &app_state.history[app_state.history_count];
+        history_item_t* item = &app_state.history[app_state.history_count];
         strncpy(item->method, method, sizeof(item->method) - 1);
         item->method[sizeof(item->method) - 1] = '\0';
         strncpy(item->url, url, sizeof(item->url) - 1);
@@ -294,7 +294,7 @@ static void load_workspace_from_file(const char* filename) {
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s/%s", app_state.settings.data_folder_path, filename);
     
-    Workspace* workspace = &app_state.workspaces[app_state.workspace_count];
+    workspace_t* workspace = &app_state.workspaces[app_state.workspace_count];
     
     // Extract workspace name from filename
     extract_workspace_name(filename, workspace->name, sizeof(workspace->name));
@@ -305,12 +305,12 @@ static void load_workspace_from_file(const char* filename) {
     // Load the workspace content
     http_collection_t workspace_collection;
     if (http_parse_file(full_path, &workspace_collection) == 0) {
-        // Parse requests and group them by collection name from the [Collection] prefix
+        // Parse requests and group them by collection name from the [collection_t] prefix
         for (int i = 0; i < workspace_collection.count; i++) {
             const http_request_t* request = &workspace_collection.requests[i];
             
-            // Extract collection name from request name format "[Collection] Request"
-            char collection_name[128] = "Default Collection";
+            // Extract collection name from request name format "[collection_t] Request"
+            char collection_name[128] = "Default collection_t";
             char request_name[128];
             
             if (request->name[0] == '[') {
@@ -330,7 +330,7 @@ static void load_workspace_from_file(const char* filename) {
             }
             
             // Find or create collection
-            Collection* target_collection = NULL;
+            collection_t* target_collection = NULL;
             for (int c = 0; c < workspace->collection_count; c++) {
                 if (strcmp(workspace->collections[c].name, collection_name) == 0) {
                     target_collection = &workspace->collections[c];
@@ -349,7 +349,7 @@ static void load_workspace_from_file(const char* filename) {
             
             // Add request to collection
             if (target_collection && target_collection->request_count < MAX_REQUESTS_PER_COLLECTION) {
-                RequestItem* item = &target_collection->requests[target_collection->request_count];
+                request_item_t* item = &target_collection->requests[target_collection->request_count];
                 strncpy(item->name, request_name, sizeof(item->name) - 1);
                 strncpy(item->method, request->method, sizeof(item->method) - 1);
                 strncpy(item->url, request->url, sizeof(item->url) - 1);
@@ -412,7 +412,7 @@ static void scan_and_load_workspaces(void) {
 
 static void ensure_default_workspace(void) {
     if (app_state.workspace_count == 0) {
-        Workspace* workspace = &app_state.workspaces[0];
+        workspace_t* workspace = &app_state.workspaces[0];
         strncpy(workspace->name, "Default", sizeof(workspace->name) - 1);
         workspace->name[sizeof(workspace->name) - 1] = '\0';
         snprintf(workspace->filename, sizeof(workspace->filename), "%s/default.http", app_state.settings.data_folder_path);
@@ -433,16 +433,16 @@ static void move_request_to_collection(int src_workspace, int src_collection, in
         return;
     }
     
-    Workspace* src_ws = &app_state.workspaces[src_workspace];
-    Workspace* dest_ws = &app_state.workspaces[dest_workspace];
+    workspace_t* src_ws = &app_state.workspaces[src_workspace];
+    workspace_t* dest_ws = &app_state.workspaces[dest_workspace];
     
     if (src_collection < 0 || src_collection >= src_ws->collection_count ||
         dest_collection < 0 || dest_collection >= dest_ws->collection_count) {
         return;
     }
     
-    Collection* src_col = &src_ws->collections[src_collection];
-    Collection* dest_col = &dest_ws->collections[dest_collection];
+    collection_t* src_col = &src_ws->collections[src_collection];
+    collection_t* dest_col = &dest_ws->collections[dest_collection];
     
     if (src_request < 0 || src_request >= src_col->request_count ||
         dest_col->request_count >= MAX_REQUESTS_PER_COLLECTION) {
@@ -450,8 +450,8 @@ static void move_request_to_collection(int src_workspace, int src_collection, in
     }
     
     // Copy the request to destination
-    RequestItem* request = &src_col->requests[src_request];
-    RequestItem* dest_item = &dest_col->requests[dest_col->request_count];
+    request_item_t* request = &src_col->requests[src_request];
+    request_item_t* dest_item = &dest_col->requests[dest_col->request_count];
     *dest_item = *request;
     dest_col->request_count++;
     
@@ -471,7 +471,7 @@ static void delete_selected_item(void) {
     if (app_state.selection.workspace_index < 0 || 
         app_state.selection.workspace_index >= app_state.workspace_count) return;
     
-    Workspace* workspace = &app_state.workspaces[app_state.selection.workspace_index];
+    workspace_t* workspace = &app_state.workspaces[app_state.selection.workspace_index];
     
     if (app_state.selection.type == 1) { // Delete collection
         if (app_state.selection.collection_index < 0 || 
@@ -487,7 +487,7 @@ static void delete_selected_item(void) {
         if (app_state.selection.collection_index < 0 || 
             app_state.selection.collection_index >= workspace->collection_count) return;
         
-        Collection* collection = &workspace->collections[app_state.selection.collection_index];
+        collection_t* collection = &workspace->collections[app_state.selection.collection_index];
         
         if (app_state.selection.request_index < 0 || 
             app_state.selection.request_index >= collection->request_count) return;
@@ -643,10 +643,10 @@ static void add_to_collection(const char* collection_name, const char* request_n
                             const char* method, const char* url, const char* headers, const char* body) {
     ensure_default_workspace();
     
-    Workspace* workspace = &app_state.workspaces[app_state.active_workspace];
+    workspace_t* workspace = &app_state.workspaces[app_state.active_workspace];
     
     // Find or create collection
-    Collection* target_collection = NULL;
+    collection_t* target_collection = NULL;
     for (int i = 0; i < workspace->collection_count; i++) {
         if (strcmp(workspace->collections[i].name, collection_name) == 0) {
             target_collection = &workspace->collections[i];
@@ -666,7 +666,7 @@ static void add_to_collection(const char* collection_name, const char* request_n
     
     // Add request to collection
     if (target_collection && target_collection->request_count < MAX_REQUESTS_PER_COLLECTION) {
-        RequestItem* item = &target_collection->requests[target_collection->request_count];
+        request_item_t* item = &target_collection->requests[target_collection->request_count];
         strncpy(item->name, request_name, sizeof(item->name) - 1);
         strncpy(item->method, method, sizeof(item->method) - 1);
         strncpy(item->url, url, sizeof(item->url) - 1);
@@ -699,7 +699,7 @@ static void save_data(void) {
     // Convert history to HTTP format
     for (int i = 0; i < app_state.history_count; i++) {
         http_request_t request;
-        HistoryItem* hist_item = &app_state.history[i];
+        history_item_t* hist_item = &app_state.history[i];
         
         // Create descriptive name with timestamp and status
         snprintf(request.name, sizeof(request.name), "[%s] %s %s - Status: %ld", 
@@ -732,17 +732,17 @@ static void save_data(void) {
     
     // Save each workspace to its own file
     for (int w = 0; w < app_state.workspace_count; w++) {
-        Workspace* workspace = &app_state.workspaces[w];
+        workspace_t* workspace = &app_state.workspaces[w];
         http_collection_t workspace_collection;
         http_collection_clear(&workspace_collection);
 
         // Convert all collections in this workspace to parser format
         for (int c = 0; c < workspace->collection_count; c++) {
-            Collection* collection = &workspace->collections[c];
+            collection_t* collection = &workspace->collections[c];
             
             // Add all requests from this collection
             for (int r = 0; r < collection->request_count; r++) {
-                RequestItem* item = &collection->requests[r];
+                request_item_t* item = &collection->requests[r];
                 http_request_t request;
         
                 // Create request name with collection prefix
@@ -780,7 +780,7 @@ static void load_data(void) {
         app_state.history_count = 0;
         for (int i = 0; i < history_collection.count && i < MAX_HISTORY_ITEMS; i++) {
             const http_request_t* request = &history_collection.requests[i];
-            HistoryItem* hist_item = &app_state.history[app_state.history_count];
+            history_item_t* hist_item = &app_state.history[app_state.history_count];
             
             strncpy(hist_item->method, request->method, sizeof(hist_item->method) - 1);
             strncpy(hist_item->url, request->url, sizeof(hist_item->url) - 1);
@@ -854,7 +854,7 @@ static void ui_sidebar(struct nk_context *ctx, int width, int height) {
         if (nk_button_label(ctx, app_state.active_tab == 0 ? "[History]" : "History")) {
             app_state.active_tab = 0;
         }
-        if (nk_button_label(ctx, app_state.active_tab == 1 ? "[Collections]" : "Collections")) {
+        if (nk_button_label(ctx, app_state.active_tab == 1 ? "[collection_ts]" : "collection_ts")) {
             app_state.active_tab = 1;
         }
         
@@ -878,9 +878,9 @@ static void ui_sidebar(struct nk_context *ctx, int width, int height) {
     // Draw drag preview
     ui_drag_preview(ctx);
     
-    // Settings button at bottom
+    // settings_t button at bottom
     nk_layout_row_dynamic(ctx, 35, 1);
-    if (nk_button_label(ctx, "⚙ Settings")) {
+    if (nk_button_label(ctx, "⚙ settings_t")) {
         app_state.show_settings_page = !app_state.show_settings_page;
     }
     
@@ -893,7 +893,7 @@ static void ui_sidebar(struct nk_context *ctx, int width, int height) {
 
 static void ui_history_tab(struct nk_context *ctx) {
     for (int i = app_state.history_count - 1; i >= 0; i--) {
-        HistoryItem* item = &app_state.history[i];
+        history_item_t* item = &app_state.history[i];
         
         // Filter by search
         if (strlen(app_state.search_text) > 0 && 
@@ -949,20 +949,20 @@ static void ui_collections_tab(struct nk_context *ctx) {
                            app_state.method_selected == 2 ? "PUT" :
                            app_state.method_selected == 3 ? "DELETE" : "PATCH";
         
-        add_to_collection("Default Collection", name, method, app_state.url, app_state.headers, app_state.body);
+        add_to_collection("Default collection_t", name, method, app_state.url, app_state.headers, app_state.body);
     }
     
-    // Workspace dropdown
+    // workspace_t dropdown
     ui_workspace_dropdown(ctx);
     
-    // Collection tree
+    // collection_t tree
     ui_collection_tree(ctx);
 }
 
 static void ui_workspace_dropdown(struct nk_context *ctx) {
     // Display workspace dropdown with add button
     if (app_state.workspace_count > 0) {
-        Workspace* current_workspace = &app_state.workspaces[app_state.active_workspace];
+        workspace_t* current_workspace = &app_state.workspaces[app_state.active_workspace];
                     
                     nk_layout_row_begin(ctx, NK_DYNAMIC, 25, 2);
                     nk_layout_row_push(ctx, 0.8f);
@@ -983,7 +983,7 @@ static void ui_workspace_dropdown(struct nk_context *ctx) {
                 } else {
                     // No workspaces yet, show create button
                     nk_layout_row_dynamic(ctx, 25, 1);
-                    if (nk_button_label(ctx, "Create Workspace")) {
+                    if (nk_button_label(ctx, "Create workspace_t")) {
                         app_state.show_new_workspace_popup = 1;
                         strcpy(app_state.new_workspace_name, "");
                     }
@@ -991,10 +991,10 @@ static void ui_workspace_dropdown(struct nk_context *ctx) {
 }
 
 static void ui_collection_tree(struct nk_context *ctx) {
-    // Collection tree would be implemented here
+    // collection_t tree would be implemented here
     // For now, just a placeholder
     nk_layout_row_dynamic(ctx, 20, 1);
-    nk_label(ctx, "Collection tree placeholder...", NK_TEXT_LEFT);
+    nk_label(ctx, "collection_t tree placeholder...", NK_TEXT_LEFT);
 }
 
 static void ui_drag_preview(struct nk_context *ctx) {
@@ -1008,9 +1008,9 @@ static void ui_drag_preview(struct nk_context *ctx) {
 }
 
 static void ui_settings_page(struct nk_context *ctx, int x, int width, int height) {
-    if (nk_begin(ctx, "Settings", nk_rect(x, 0, width, height), NK_WINDOW_NO_SCROLLBAR)) {
+    if (nk_begin(ctx, "settings_t", nk_rect(x, 0, width, height), NK_WINDOW_NO_SCROLLBAR)) {
         nk_layout_row_dynamic(ctx, 40, 1);
-        nk_label(ctx, "Settings", NK_TEXT_CENTERED);
+        nk_label(ctx, "settings_t", NK_TEXT_CENTERED);
         
         nk_layout_row_dynamic(ctx, 10, 1); // Spacer
         
@@ -1074,10 +1074,10 @@ static void ui_settings_page(struct nk_context *ctx, int x, int width, int heigh
             apply_theme();
             save_settings();
         }
-        if (nk_button_label(ctx, "Save Settings")) {
+        if (nk_button_label(ctx, "Save settings_t")) {
             save_settings();
         }
-        if (nk_button_label(ctx, "Close Settings")) {
+        if (nk_button_label(ctx, "Close settings_t")) {
             app_state.show_settings_page = 0;
         }
     }
