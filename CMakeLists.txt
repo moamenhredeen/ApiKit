@@ -45,10 +45,9 @@ if(APPLE)
         #MACOSX_BUNDLE_ICON_FILE "icon.icns"
     )
 
-    # Add resources only for macOS
-    # set_source_files_properties(${CMAKE_SOURCE_DIR}/resources/icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
-
-    # target_sources(MyApp PRIVATE ${CMAKE_SOURCE_DIR}/resources/icon.icns)
+    set(FONT_FILE ${CMAKE_SOURCE_DIR}/resources/fonts/JetBrainsMonoNL-Regular.ttf)
+    set_source_files_properties(${FONT_FILE} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+    target_sources(apikit PRIVATE ${FONT_FILE})
 else()
     add_executable(apikit ${SOURCES} ${THIRD_PARTY_SOURCES})
 endif()
@@ -84,7 +83,7 @@ target_compile_definitions(apikit PRIVATE
 
 # Set output directory
 set_target_properties(apikit PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
 # Debug configuration
@@ -102,3 +101,6 @@ if(DOXYGEN_EXECUTABLE)
         COMMENT "Generating documentation with Doxygen"
     )
 endif()
+
+file(COPY resources DESTINATION ${CMAKE_BINARY_DIR})
+

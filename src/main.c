@@ -1308,7 +1308,11 @@ int main(int argc, char *argv[]) {
     // Load Fonts
     struct nk_font_atlas *atlas;
     nk_glfw3_font_stash_begin(&glfw, &atlas);
+    struct nk_font *jetbrains_mono_regular = nk_font_atlas_add_from_file(atlas, "JetBrainsMonoNL-Regular.ttf", 24.0f, 0);
     nk_glfw3_font_stash_end(&glfw);
+
+
+    nk_init_default(ctx, &jetbrains_mono_regular->handle);
 
     // Main loop
     while (!glfwWindowShouldClose(window)) {
