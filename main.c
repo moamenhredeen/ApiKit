@@ -24,6 +24,8 @@ void ensure_default_workspace();
 void scan_and_load_workspaces();
 void move_request_to_collection(int src_workspace, int src_collection, int src_request, 
                                 int dest_workspace, int dest_collection);
+void handle_keyboard_shortcuts(struct nk_context *ctx);
+void delete_selected_item();
 
 // History item
 typedef struct {
@@ -94,6 +96,20 @@ typedef struct {
     int drag_collection_index;       // Source collection index  
     int drag_request_index;          // Source request index
     char drag_preview[256];          // Text to show while dragging
+    
+    // Selection state for delete operations
+    int selected_item_type;          // 0 = none, 1 = collection, 2 = request
+    int selected_workspace_index;
+    int selected_collection_index;
+    int selected_request_index;
+    
+    // Input focus state
+    int search_has_focus;
+    int url_has_focus;
+    
+    // Keyboard state tracking (for edge detection)
+    int prev_ctrl_b_combo;
+    int prev_ctrl_f_combo;
 } gui_state_t;
 
 static gui_state_t gui_state = {
@@ -118,7 +134,15 @@ static gui_state_t gui_state = {
     .drag_workspace_index = -1,
     .drag_collection_index = -1,
     .drag_request_index = -1,
-    .drag_preview = ""
+    .drag_preview = "",
+    .selected_item_type = 0,
+    .selected_workspace_index = -1,
+    .selected_collection_index = -1,
+    .selected_request_index = -1,
+    .search_has_focus = 0,
+    .url_has_focus = 0,
+    .prev_ctrl_b_combo = 0,
+    .prev_ctrl_f_combo = 0
 };
 
 // Helper functions
@@ -347,6 +371,91 @@ void move_request_to_collection(int src_workspace, int src_collection, int src_r
     save_data();
 }
 
+// Delete the currently selected item (collection or request)
+void delete_selected_item() {
+    if (gui_state.selected_item_type == 0) return; // Nothing selected
+    
+    if (gui_state.selected_workspace_index < 0 || 
+        gui_state.selected_workspace_index >= gui_state.workspace_count) return;
+    
+    workspace_t* workspace = &gui_state.workspaces[gui_state.selected_workspace_index];
+    
+    if (gui_state.selected_item_type == 1) { // Delete collection
+        if (gui_state.selected_collection_index < 0 || 
+            gui_state.selected_collection_index >= workspace->collection_count) return;
+        
+        // Shift remaining collections
+        for (int i = gui_state.selected_collection_index; i < workspace->collection_count - 1; i++) {
+            workspace->collections[i] = workspace->collections[i + 1];
+        }
+        workspace->collection_count--;
+        
+    } else if (gui_state.selected_item_type == 2) { // Delete request
+        if (gui_state.selected_collection_index < 0 || 
+            gui_state.selected_collection_index >= workspace->collection_count) return;
+        
+        collection_t* collection = &workspace->collections[gui_state.selected_collection_index];
+        
+        if (gui_state.selected_request_index < 0 || 
+            gui_state.selected_request_index >= collection->request_count) return;
+        
+        // Shift remaining requests
+        for (int i = gui_state.selected_request_index; i < collection->request_count - 1; i++) {
+            collection->requests[i] = collection->requests[i + 1];
+        }
+        collection->request_count--;
+    }
+    
+    // Clear selection
+    gui_state.selected_item_type = 0;
+    gui_state.selected_workspace_index = -1;
+    gui_state.selected_collection_index = -1;
+    gui_state.selected_request_index = -1;
+    
+    save_data();
+}
+
+// Handle keyboard shortcuts
+void handle_keyboard_shortcuts(struct nk_context *ctx) {
+    struct nk_input *input = &ctx->input;
+    
+    // Delete key: Delete selected item
+    if (nk_input_is_key_pressed(input, NK_KEY_DEL)) {
+        delete_selected_item();
+    }
+    
+    // Use GLFW for reliable key detection since Nuklear's text input is inconsistent
+    GLFWwindow* window = glfwGetCurrentContext();
+    if (window) {
+        // Check modifier keys using GLFW
+        int ctrl_left = glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS;
+        int ctrl_right = glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS;
+        int ctrl_pressed = ctrl_left || ctrl_right;
+        
+        // Check letter keys
+        int b_pressed = glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS;
+        int f_pressed = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
+        
+        // Ctrl+B combination
+        int ctrl_b_combo = ctrl_pressed && b_pressed;
+        if (ctrl_b_combo && !gui_state.prev_ctrl_b_combo) {
+            gui_state.show_sidebar = !gui_state.show_sidebar;
+        }
+        gui_state.prev_ctrl_b_combo = ctrl_b_combo;
+        
+        // Ctrl+F combination  
+        int ctrl_f_combo = ctrl_pressed && f_pressed;
+        if (ctrl_f_combo && !gui_state.prev_ctrl_f_combo) {
+            gui_state.show_sidebar = 1;
+            gui_state.active_tab = 1; // Switch to collections tab
+            gui_state.search_has_focus = 1;
+        }
+        gui_state.prev_ctrl_f_combo = ctrl_f_combo;
+    }
+    
+    // Ctrl+A, Ctrl+V, Ctrl+C are handled by Nuklear automatically for text inputs
+}
+
 void add_to_collection(const char* collection_name, const char* request_name, const char* method, const char* url, const char* headers, const char* body) {
     ensure_default_workspace();
     
@@ -529,7 +638,12 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
         
         // Search field
         nk_layout_row_static(ctx, 25, sidebar_width - 20, 1);
-        nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, gui_state.search_text, 
+        nk_flags edit_flags = NK_EDIT_FIELD;
+        if (gui_state.search_has_focus) {
+            edit_flags |= NK_EDIT_AUTO_SELECT;
+            gui_state.search_has_focus = 0; // Reset after one frame
+        }
+        nk_edit_string_zero_terminated(ctx, edit_flags, gui_state.search_text, 
                                        sizeof(gui_state.search_text), nk_filter_default);
         
         // Tabs
@@ -744,6 +858,14 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
                             collection_label[sizeof(collection_label) - 1] = '\0';
                         }
                         
+                        // Check for right-click to select collection
+                        if (nk_input_is_mouse_click_down_in_rect(&ctx->input, NK_BUTTON_RIGHT, collection_bounds, nk_true)) {
+                            gui_state.selected_item_type = 1; // Collection selected
+                            gui_state.selected_workspace_index = gui_state.active_workspace;
+                            gui_state.selected_collection_index = c;
+                            gui_state.selected_request_index = -1;
+                        }
+                        
                         if (nk_tree_push_id(ctx, NK_TREE_NODE, collection_label, NK_MINIMIZED, c)) {
                             collection->expanded = 1;
                             
@@ -777,6 +899,15 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
                                 
                                 // Check for button press and drag
                                 struct nk_rect button_bounds = nk_widget_bounds(ctx);
+                                
+                                // Check for right-click to select request
+                                if (nk_input_is_mouse_click_down_in_rect(&ctx->input, NK_BUTTON_RIGHT, button_bounds, nk_true)) {
+                                    gui_state.selected_item_type = 2; // Request selected
+                                    gui_state.selected_workspace_index = gui_state.active_workspace;
+                                    gui_state.selected_collection_index = c;
+                                    gui_state.selected_request_index = r;
+                                }
+                                
                                 if (nk_button_label(ctx, button_text)) {
                                     // Load this collection item
                                     strncpy(gui_state.url, item->url, sizeof(gui_state.url));
@@ -827,12 +958,19 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
         nk_layout_space_end(ctx);
     }
     
+    // Show keyboard shortcuts help at bottom
+    nk_layout_row_dynamic(ctx, 15, 1);
+    nk_label(ctx, "Keys: Ctrl+B=Toggle Sidebar | Ctrl+F=Search | Del=Delete | Right-click=Select", NK_TEXT_CENTERED);
+    
     nk_end(ctx);
     
 
 }
 
 void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
+    // Handle keyboard shortcuts first
+    handle_keyboard_shortcuts(ctx);
+    
     // Get window size and fill the entire window
     int width, height;
     glfwGetWindowSize(glfwGetCurrentContext(), &width, &height);
@@ -866,7 +1004,11 @@ void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
         nk_layout_row_push(ctx, 100);  // Fixed 100px for dropdown
         gui_state.method_selected = nk_combo(ctx, methods, 5, gui_state.method_selected, 25, nk_vec2(120, 200));
         nk_layout_row_push(ctx, main_area_width - 180);  // Remaining space minus button and dropdown
-        nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, gui_state.url, 
+        nk_flags url_flags = NK_EDIT_FIELD;
+        if (nk_widget_has_mouse_click_down(ctx, NK_BUTTON_LEFT, nk_true)) {
+            gui_state.url_has_focus = 1;
+        }
+        nk_edit_string_zero_terminated(ctx, url_flags, gui_state.url, 
                                        sizeof(gui_state.url), nk_filter_default);
         nk_layout_row_push(ctx, 80);  // Fixed 80px for send button
         if (nk_button_label(ctx, "SEND") && !gui_state.request_in_progress) {
