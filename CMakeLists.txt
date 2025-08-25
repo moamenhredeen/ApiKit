@@ -10,10 +10,10 @@ find_package(CURL REQUIRED)
 find_package(OpenGL REQUIRED)
 
 # Add executable with all source files
-add_executable(apikit 
-    main.c 
+add_executable(apikit
+    main.c
     http_client.c
-    cJSON.c
+    http_parser.c
 )
 
 # Link libraries

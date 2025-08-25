@@ -11,7 +11,7 @@
 #include "nuklear_glfw_gl3.h"
 
 #include "http_client.h"
-#include "cJSON.h"
+#include "http_parser.h"
 
 // Forward declarations
 void save_data();
@@ -108,129 +108,147 @@ void add_to_collection(const char* name, const char* method, const char* url, co
     }
 }
 
-// Save data to JSON file
+// Save data in HTTP file format for both collections and history
 void save_data() {
-    cJSON *root = cJSON_CreateObject();
+    // Save history in HTTP format
+    http_collection_t history_collection;
+    http_collection_clear(&history_collection);
     
-    // Save history
-    cJSON *history_array = cJSON_CreateArray();
+    // Convert history to HTTP format
     for (int i = 0; i < gui_state.history_count; i++) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "method", gui_state.history[i].method);
-        cJSON_AddStringToObject(item, "url", gui_state.history[i].url);
-        cJSON_AddNumberToObject(item, "status_code", gui_state.history[i].status_code);
-        cJSON_AddStringToObject(item, "timestamp", gui_state.history[i].timestamp);
-        cJSON_AddItemToArray(history_array, item);
+        http_request_t request;
+        history_item_t* hist_item = &gui_state.history[i];
+        
+        // Create descriptive name with timestamp and status
+        snprintf(request.name, sizeof(request.name), "[%s] %s %s - Status: %ld", 
+                hist_item->timestamp, hist_item->method, hist_item->url, hist_item->status_code);
+        
+        strncpy(request.method, hist_item->method, sizeof(request.method) - 1);
+        strncpy(request.url, hist_item->url, sizeof(request.url) - 1);
+        
+        // Add timestamp and status as comment in headers
+        snprintf(request.headers, sizeof(request.headers), 
+                "# Timestamp: %s\n# Status Code: %ld", 
+                hist_item->timestamp, hist_item->status_code);
+        
+        request.body[0] = '\0'; // No body for history items
+        
+        // Null terminate strings
+        request.name[sizeof(request.name) - 1] = '\0';
+        request.method[sizeof(request.method) - 1] = '\0';
+        request.url[sizeof(request.url) - 1] = '\0';
+        request.headers[sizeof(request.headers) - 1] = '\0';
+        request.body[sizeof(request.body) - 1] = '\0';
+        
+        http_collection_add(&history_collection, &request);
     }
-    cJSON_AddItemToObject(root, "history", history_array);
     
-    // Save collections
-    cJSON *collections_array = cJSON_CreateArray();
+    // Save history using parser
+    http_save_file("history.http", &history_collection);
+    
+    // Save collections in HTTP file format using parser
+    http_collection_t collection;
+    http_collection_clear(&collection);
+    
+    // Convert from GUI state to parser format
     for (int i = 0; i < gui_state.collection_count; i++) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "name", gui_state.collections[i].name);
-        cJSON_AddStringToObject(item, "method", gui_state.collections[i].method);
-        cJSON_AddStringToObject(item, "url", gui_state.collections[i].url);
-        cJSON_AddStringToObject(item, "headers", gui_state.collections[i].headers);
-        cJSON_AddStringToObject(item, "body", gui_state.collections[i].body);
-        cJSON_AddItemToArray(collections_array, item);
+        http_request_t request;
+        collection_item_t* item = &gui_state.collections[i];
+        
+        strncpy(request.name, item->name, sizeof(request.name) - 1);
+        strncpy(request.method, item->method, sizeof(request.method) - 1);
+        strncpy(request.url, item->url, sizeof(request.url) - 1);
+        strncpy(request.headers, item->headers, sizeof(request.headers) - 1);
+        strncpy(request.body, item->body, sizeof(request.body) - 1);
+        
+        // Null terminate strings
+        request.name[sizeof(request.name) - 1] = '\0';
+        request.method[sizeof(request.method) - 1] = '\0';
+        request.url[sizeof(request.url) - 1] = '\0';
+        request.headers[sizeof(request.headers) - 1] = '\0';
+        request.body[sizeof(request.body) - 1] = '\0';
+        
+        http_collection_add(&collection, &request);
     }
-    cJSON_AddItemToObject(root, "collections", collections_array);
     
-    // Write to file
-    char *json_string = cJSON_Print(root);
-    FILE *file = fopen("apikit_data.json", "w");
-    if (file) {
-        fprintf(file, "%s", json_string);
-        fclose(file);
-    }
-    
-    free(json_string);
-    cJSON_Delete(root);
+    // Save using parser
+    http_save_file("apikit_collection.http", &collection);
 }
 
-// Load data from JSON file
+// Load data from files  
 void load_data() {
-    FILE *file = fopen("apikit_data.json", "r");
-    if (!file) {
-        return; // File doesn't exist, that's ok
-    }
-    
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long length = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    
-    // Read file content
-    char *json_string = malloc(length + 1);
-    fread(json_string, 1, length, file);
-    json_string[length] = '\0';
-    fclose(file);
-    
-    // Parse JSON
-    cJSON *root = cJSON_Parse(json_string);
-    if (!root) {
-        free(json_string);
-        return;
-    }
-    
-    // Load history
-    cJSON *history_array = cJSON_GetObjectItem(root, "history");
-    if (cJSON_IsArray(history_array)) {
+    // Load history from HTTP format
+    http_collection_t history_collection;
+    if (http_parse_file("history.http", &history_collection) == 0) {
         gui_state.history_count = 0;
-        cJSON *item = NULL;
-        cJSON_ArrayForEach(item, history_array) {
-            if (gui_state.history_count >= 100) break;
+        for (int i = 0; i < history_collection.count && i < 100; i++) {
+            const http_request_t* request = &history_collection.requests[i];
+            history_item_t* hist_item = &gui_state.history[gui_state.history_count];
             
-            cJSON *method = cJSON_GetObjectItem(item, "method");
-            cJSON *url = cJSON_GetObjectItem(item, "url");
-            cJSON *status_code = cJSON_GetObjectItem(item, "status_code");
-            cJSON *timestamp = cJSON_GetObjectItem(item, "timestamp");
+            strncpy(hist_item->method, request->method, sizeof(hist_item->method) - 1);
+            strncpy(hist_item->url, request->url, sizeof(hist_item->url) - 1);
             
-            if (cJSON_IsString(method) && cJSON_IsString(url) && 
-                cJSON_IsNumber(status_code) && cJSON_IsString(timestamp)) {
-                
-                history_item_t* hist_item = &gui_state.history[gui_state.history_count];
-                strncpy(hist_item->method, method->valuestring, sizeof(hist_item->method) - 1);
-                strncpy(hist_item->url, url->valuestring, sizeof(hist_item->url) - 1);
-                hist_item->status_code = (long)status_code->valuedouble;
-                strncpy(hist_item->timestamp, timestamp->valuestring, sizeof(hist_item->timestamp) - 1);
-                gui_state.history_count++;
+            // Parse timestamp and status from headers (comments)
+            hist_item->status_code = 0;
+            hist_item->timestamp[0] = '\0';
+            
+            // Simple parsing of our comment format
+            char headers_copy[1024];
+            strncpy(headers_copy, request->headers, sizeof(headers_copy));
+            headers_copy[sizeof(headers_copy) - 1] = '\0';
+            
+            char *line = strtok(headers_copy, "\n");
+            while (line) {
+                if (strncmp(line, "# Timestamp: ", 13) == 0) {
+                    strncpy(hist_item->timestamp, line + 13, sizeof(hist_item->timestamp) - 1);
+                    hist_item->timestamp[sizeof(hist_item->timestamp) - 1] = '\0';
+                } else if (strncmp(line, "# Status Code: ", 15) == 0) {
+                    hist_item->status_code = atol(line + 15);
+                }
+                line = strtok(NULL, "\n");
             }
+            
+            // Fallback if parsing failed
+            if (hist_item->timestamp[0] == '\0') {
+                strncpy(hist_item->timestamp, "00:00:00", sizeof(hist_item->timestamp) - 1);
+            }
+            
+            // Null terminate strings
+            hist_item->method[sizeof(hist_item->method) - 1] = '\0';
+            hist_item->url[sizeof(hist_item->url) - 1] = '\0';
+            hist_item->timestamp[sizeof(hist_item->timestamp) - 1] = '\0';
+            
+            gui_state.history_count++;
         }
     }
     
-    // Load collections
-    cJSON *collections_array = cJSON_GetObjectItem(root, "collections");
-    if (cJSON_IsArray(collections_array)) {
+    // Load collections from HTTP file using parser
+    http_collection_t collection;
+    if (http_parse_file("apikit_collection.http", &collection) == 0) {
         gui_state.collection_count = 0;
-        cJSON *item = NULL;
-        cJSON_ArrayForEach(item, collections_array) {
-            if (gui_state.collection_count >= 50) break;
+        for (int i = 0; i < collection.count && i < 50; i++) {
+            const http_request_t* request = &collection.requests[i];
+            collection_item_t* item = &gui_state.collections[gui_state.collection_count];
             
-            cJSON *name = cJSON_GetObjectItem(item, "name");
-            cJSON *method = cJSON_GetObjectItem(item, "method");
-            cJSON *url = cJSON_GetObjectItem(item, "url");
-            cJSON *headers = cJSON_GetObjectItem(item, "headers");
-            cJSON *body = cJSON_GetObjectItem(item, "body");
+            strncpy(item->name, request->name, sizeof(item->name) - 1);
+            strncpy(item->method, request->method, sizeof(item->method) - 1);
+            strncpy(item->url, request->url, sizeof(item->url) - 1);
+            strncpy(item->headers, request->headers, sizeof(item->headers) - 1);
+            strncpy(item->body, request->body, sizeof(item->body) - 1);
             
-            if (cJSON_IsString(name) && cJSON_IsString(method) && cJSON_IsString(url) &&
-                cJSON_IsString(headers) && cJSON_IsString(body)) {
-                
-                collection_item_t* coll_item = &gui_state.collections[gui_state.collection_count];
-                strncpy(coll_item->name, name->valuestring, sizeof(coll_item->name) - 1);
-                strncpy(coll_item->method, method->valuestring, sizeof(coll_item->method) - 1);
-                strncpy(coll_item->url, url->valuestring, sizeof(coll_item->url) - 1);
-                strncpy(coll_item->headers, headers->valuestring, sizeof(coll_item->headers) - 1);
-                strncpy(coll_item->body, body->valuestring, sizeof(coll_item->body) - 1);
-                gui_state.collection_count++;
-            }
+            // Null terminate strings
+            item->name[sizeof(item->name) - 1] = '\0';
+            item->method[sizeof(item->method) - 1] = '\0';
+            item->url[sizeof(item->url) - 1] = '\0';
+            item->headers[sizeof(item->headers) - 1] = '\0';
+            item->body[sizeof(item->body) - 1] = '\0';
+            
+            gui_state.collection_count++;
         }
     }
-    
-    free(json_string);
-    cJSON_Delete(root);
 }
+
+
 
 void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
     if (nk_begin(ctx, "Sidebar", nk_rect(0, 0, sidebar_width, height),
