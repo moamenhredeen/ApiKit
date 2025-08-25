@@ -1,0 +1,11 @@
+# API Kit Configuration
+
+[general]
+data_folder = "data"
+theme = 1
+
+[keybindings]
+enabled = true
+ctrl_b_enabled = true
+ctrl_f_enabled = true
+delete_key_enabled = true

@@ -9,11 +9,14 @@ find_package(glfw3 REQUIRED)
 find_package(CURL REQUIRED)
 find_package(OpenGL REQUIRED)
 
+# tomlc99 is included as source files
+
 # Add executable with all source files
 add_executable(apikit
     main.c
     http_client.c
     http_parser.c
+    toml.c
 )
 
 # Link libraries

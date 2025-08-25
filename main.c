@@ -15,6 +15,7 @@
 
 #include "http_client.h"
 #include "http_parser.h"
+#include "toml.h"
 
 // Forward declarations
 void save_data();
@@ -26,6 +27,10 @@ void move_request_to_collection(int src_workspace, int src_collection, int src_r
                                 int dest_workspace, int dest_collection);
 void handle_keyboard_shortcuts(struct nk_context *ctx);
 void delete_selected_item();
+void save_settings();
+void load_settings();
+void apply_theme();
+void draw_settings_page(struct nk_context *ctx, int width, int height);
 
 // History item
 typedef struct {
@@ -110,6 +115,15 @@ typedef struct {
     // Keyboard state tracking (for edge detection)
     int prev_ctrl_b_combo;
     int prev_ctrl_f_combo;
+    
+    // Settings
+    char data_folder_path[512];
+    int theme_selected;              // 0 = default, 1 = dark, 2 = light
+    int keybindings_enabled;
+    int ctrl_b_enabled;
+    int ctrl_f_enabled;
+    int delete_key_enabled;
+    int show_settings_page;          // Show settings in main view
 } gui_state_t;
 
 static gui_state_t gui_state = {
@@ -142,7 +156,14 @@ static gui_state_t gui_state = {
     .search_has_focus = 0,
     .url_has_focus = 0,
     .prev_ctrl_b_combo = 0,
-    .prev_ctrl_f_combo = 0
+    .prev_ctrl_f_combo = 0,
+    .data_folder_path = "data",
+    .theme_selected = 0,
+    .keybindings_enabled = 1,
+    .ctrl_b_enabled = 1,
+    .ctrl_f_enabled = 1,
+    .delete_key_enabled = 1,
+    .show_settings_page = 0
 };
 
 // Helper functions
@@ -168,8 +189,8 @@ void add_to_history(const char* method, const char* url, long status_code) {
 // Helper function to ensure data directory exists
 void ensure_data_directory() {
     struct stat st = {0};
-    if (stat("data", &st) == -1) {
-        mkdir("data", 0755);
+    if (stat(gui_state.data_folder_path, &st) == -1) {
+        mkdir(gui_state.data_folder_path, 0755);
     }
 }
 
@@ -201,7 +222,7 @@ void load_workspace_from_file(const char* filename) {
     if (gui_state.workspace_count >= 5) return; // Max workspaces reached
     
     char full_path[512];
-    snprintf(full_path, sizeof(full_path), "data/%s", filename);
+    snprintf(full_path, sizeof(full_path), "%s/%s", gui_state.data_folder_path, filename);
     
     workspace_t* workspace = &gui_state.workspaces[gui_state.workspace_count];
     
@@ -283,7 +304,7 @@ void load_workspace_from_file(const char* filename) {
 void scan_and_load_workspaces() {
     ensure_data_directory();
     
-    DIR *dir = opendir("data");
+    DIR *dir = opendir(gui_state.data_folder_path);
     if (dir == NULL) {
         return;
     }
@@ -324,7 +345,7 @@ void ensure_default_workspace() {
     if (gui_state.workspace_count == 0) {
         workspace_t* workspace = &gui_state.workspaces[0];
         strncpy(workspace->name, "Default", sizeof(workspace->name) - 1);
-        strncpy(workspace->filename, "data/default.http", sizeof(workspace->filename) - 1);
+        snprintf(workspace->filename, sizeof(workspace->filename), "%s/default.http", gui_state.data_folder_path);
         workspace->collection_count = 0;
         gui_state.workspace_count = 1;
         gui_state.active_workspace = 0;
@@ -415,12 +436,94 @@ void delete_selected_item() {
     save_data();
 }
 
+// Save settings to TOML config file
+void save_settings() {
+    FILE *file = fopen("config.toml", "w");
+    if (file) {
+        fprintf(file, "# API Kit Configuration\n\n");
+        fprintf(file, "[general]\n");
+        fprintf(file, "data_folder = \"%s\"\n", gui_state.data_folder_path);
+        fprintf(file, "theme = %d\n\n", gui_state.theme_selected);
+        fprintf(file, "[keybindings]\n");
+        fprintf(file, "enabled = %s\n", gui_state.keybindings_enabled ? "true" : "false");
+        fprintf(file, "ctrl_b_enabled = %s\n", gui_state.ctrl_b_enabled ? "true" : "false");
+        fprintf(file, "ctrl_f_enabled = %s\n", gui_state.ctrl_f_enabled ? "true" : "false");
+        fprintf(file, "delete_key_enabled = %s\n", gui_state.delete_key_enabled ? "true" : "false");
+        fclose(file);
+    }
+}
+
+// Load settings from TOML config file
+void load_settings() {
+    FILE *file = fopen("config.toml", "r");
+    if (!file) return;
+    
+    char errbuf[200];
+    toml_table_t *config = toml_parse_file(file, errbuf, sizeof(errbuf));
+    fclose(file);
+    
+    if (!config) {
+        printf("Error parsing config.toml: %s\n", errbuf);
+        return;
+    }
+    
+    // Parse [general] section
+    toml_table_t *general = toml_table_in(config, "general");
+    if (general) {
+        toml_datum_t data_folder = toml_string_in(general, "data_folder");
+        if (data_folder.ok) {
+            strncpy(gui_state.data_folder_path, data_folder.u.s, sizeof(gui_state.data_folder_path) - 1);
+            gui_state.data_folder_path[sizeof(gui_state.data_folder_path) - 1] = '\0';
+            free(data_folder.u.s);
+        }
+        
+        toml_datum_t theme = toml_int_in(general, "theme");
+        if (theme.ok) {
+            gui_state.theme_selected = (int)theme.u.i;
+        }
+    }
+    
+    // Parse [keybindings] section
+    toml_table_t *keybindings = toml_table_in(config, "keybindings");
+    if (keybindings) {
+        toml_datum_t enabled = toml_bool_in(keybindings, "enabled");
+        if (enabled.ok) {
+            gui_state.keybindings_enabled = enabled.u.b;
+        }
+        
+        toml_datum_t ctrl_b = toml_bool_in(keybindings, "ctrl_b_enabled");
+        if (ctrl_b.ok) {
+            gui_state.ctrl_b_enabled = ctrl_b.u.b;
+        }
+        
+        toml_datum_t ctrl_f = toml_bool_in(keybindings, "ctrl_f_enabled");
+        if (ctrl_f.ok) {
+            gui_state.ctrl_f_enabled = ctrl_f.u.b;
+        }
+        
+        toml_datum_t delete_key = toml_bool_in(keybindings, "delete_key_enabled");
+        if (delete_key.ok) {
+            gui_state.delete_key_enabled = delete_key.u.b;
+        }
+    }
+    
+    toml_free(config);
+}
+
+// Apply theme (placeholder for now)
+void apply_theme() {
+    // Theme application would go here
+    // For now, we just store the preference
+}
+
 // Handle keyboard shortcuts
 void handle_keyboard_shortcuts(struct nk_context *ctx) {
+    if (!gui_state.keybindings_enabled) return;
+    
     struct nk_input *input = &ctx->input;
     
     // Delete key: Delete selected item
-    if (nk_input_is_key_pressed(input, NK_KEY_DEL)) {
+    if (gui_state.delete_key_enabled && nk_input_is_key_pressed(input, NK_KEY_DEL)) {
         delete_selected_item();
     }
     
@@ -437,20 +540,24 @@ void handle_keyboard_shortcuts(struct nk_context *ctx) {
         int f_pressed = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
         
         // Ctrl+B combination
-        int ctrl_b_combo = ctrl_pressed && b_pressed;
-        if (ctrl_b_combo && !gui_state.prev_ctrl_b_combo) {
-            gui_state.show_sidebar = !gui_state.show_sidebar;
+        if (gui_state.ctrl_b_enabled) {
+            int ctrl_b_combo = ctrl_pressed && b_pressed;
+            if (ctrl_b_combo && !gui_state.prev_ctrl_b_combo) {
+                gui_state.show_sidebar = !gui_state.show_sidebar;
+            }
+            gui_state.prev_ctrl_b_combo = ctrl_b_combo;
         }
-        gui_state.prev_ctrl_b_combo = ctrl_b_combo;
         
         // Ctrl+F combination  
-        int ctrl_f_combo = ctrl_pressed && f_pressed;
-        if (ctrl_f_combo && !gui_state.prev_ctrl_f_combo) {
-            gui_state.show_sidebar = 1;
-            gui_state.active_tab = 1; // Switch to collections tab
-            gui_state.search_has_focus = 1;
+        if (gui_state.ctrl_f_enabled) {
+            int ctrl_f_combo = ctrl_pressed && f_pressed;
+            if (ctrl_f_combo && !gui_state.prev_ctrl_f_combo) {
+                gui_state.show_sidebar = 1;
+                gui_state.active_tab = 1; // Switch to collections tab
+                gui_state.search_has_focus = 1;
+            }
+            gui_state.prev_ctrl_f_combo = ctrl_f_combo;
         }
-        gui_state.prev_ctrl_f_combo = ctrl_f_combo;
     }
     
     // Ctrl+A, Ctrl+V, Ctrl+C are handled by Nuklear automatically for text inputs
@@ -531,7 +638,9 @@ void save_data() {
     }
     
     // Save history using parser
-    http_save_file("data/history.http", &history_collection);
+    char history_path[512];
+    snprintf(history_path, sizeof(history_path), "%s/history.http", gui_state.data_folder_path);
+    http_save_file(history_path, &history_collection);
     
     // Save each workspace to its own file
     for (int w = 0; w < gui_state.workspace_count; w++) {
@@ -577,7 +686,9 @@ void load_data() {
     ensure_data_directory();
     // Load history from HTTP format
     http_collection_t history_collection;
-    if (http_parse_file("data/history.http", &history_collection) == 0) {
+    char history_path[512];
+    snprintf(history_path, sizeof(history_path), "%s/history.http", gui_state.data_folder_path);
+    if (http_parse_file(history_path, &history_collection) == 0) {
         gui_state.history_count = 0;
         for (int i = 0; i < history_collection.count && i < 100; i++) {
             const http_request_t* request = &history_collection.requests[i];
@@ -655,8 +766,8 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
             gui_state.active_tab = 1;
         }
         
-        // Tab content
-        nk_layout_row_dynamic(ctx, height - 120, 1);
+        // Tab content (reduced height to make room for settings button and help)
+        nk_layout_row_dynamic(ctx, height - 175, 1);
         if (nk_group_begin(ctx, "tab_content", NK_WINDOW_BORDER)) {
             if (gui_state.active_tab == 0) {
                 // History tab
@@ -696,7 +807,7 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
                         nk_group_end(ctx);
                     }
                 }
-            } else {
+            } else if (gui_state.active_tab == 1) {
                 // Collections tab
                 nk_layout_row_dynamic(ctx, 30, 1);
                 if (nk_button_label(ctx, "+ Save Current Request")) {
@@ -770,7 +881,7 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
                                 if (safe_name[i] == ' ') safe_name[i] = '_';
                                 if (safe_name[i] >= 'A' && safe_name[i] <= 'Z') safe_name[i] += 32; // lowercase
                             }
-                            snprintf(workspace->filename, sizeof(workspace->filename), "data/%s.http", safe_name);
+                            snprintf(workspace->filename, sizeof(workspace->filename), "%s/%s.http", gui_state.data_folder_path, safe_name);
                             
                             workspace->collection_count = 0;
                             gui_state.workspace_count++;
@@ -958,6 +1069,12 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
         nk_layout_space_end(ctx);
     }
     
+    // Settings button at bottom
+    nk_layout_row_dynamic(ctx, 35, 1);
+    if (nk_button_label(ctx, "⚙ Settings")) {
+        gui_state.show_settings_page = !gui_state.show_settings_page;
+    }
+    
     // Show keyboard shortcuts help at bottom
     nk_layout_row_dynamic(ctx, 15, 1);
     nk_label(ctx, "Keys: Ctrl+B=Toggle Sidebar | Ctrl+F=Search | Del=Delete | Right-click=Select", NK_TEXT_CENTERED);
@@ -965,6 +1082,86 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
     nk_end(ctx);
     
 
+}
+
+void draw_settings_page(struct nk_context *ctx, int width, int height) {
+    const int sidebar_width = 300;
+    int main_area_x = gui_state.show_sidebar ? sidebar_width : 0;
+    
+    if (nk_begin(ctx, "Settings", nk_rect(main_area_x, 0, width, height), NK_WINDOW_NO_SCROLLBAR)) {
+        nk_layout_row_dynamic(ctx, 40, 1);
+        nk_label(ctx, "Settings", NK_TEXT_CENTERED);
+        
+        nk_layout_row_dynamic(ctx, 10, 1); // Spacer
+        
+        // Data folder path section
+        nk_layout_row_dynamic(ctx, 30, 1);
+        nk_label(ctx, "Data Folder Configuration", NK_TEXT_LEFT);
+        
+        nk_layout_row_dynamic(ctx, 25, 1);
+        nk_label(ctx, "Data Folder Path:", NK_TEXT_LEFT);
+        nk_layout_row_dynamic(ctx, 30, 1);
+        nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, gui_state.data_folder_path, 
+                                     sizeof(gui_state.data_folder_path), nk_filter_default);
+        
+        nk_layout_row_dynamic(ctx, 20, 1); // Spacer
+        
+        // Theme section
+        nk_layout_row_dynamic(ctx, 30, 1);
+        nk_label(ctx, "Appearance", NK_TEXT_LEFT);
+        
+        nk_layout_row_dynamic(ctx, 25, 1);
+        nk_label(ctx, "Theme:", NK_TEXT_LEFT);
+        nk_layout_row_dynamic(ctx, 30, 1);
+        static const char *themes[] = {"Default", "Dark", "Light"};
+        gui_state.theme_selected = nk_combo(ctx, themes, 3, gui_state.theme_selected, 30, nk_vec2(200, 120));
+        
+        nk_layout_row_dynamic(ctx, 20, 1); // Spacer
+        
+        // Keyboard shortcuts section
+        nk_layout_row_dynamic(ctx, 30, 1);
+        nk_label(ctx, "Keyboard Shortcuts", NK_TEXT_LEFT);
+        
+        nk_layout_row_dynamic(ctx, 30, 1);
+        if (nk_checkbox_label(ctx, "Enable Keyboard Shortcuts", &gui_state.keybindings_enabled)) {
+            save_settings();
+        }
+        
+        if (gui_state.keybindings_enabled) {
+            nk_layout_row_dynamic(ctx, 5, 1); // Small spacer
+            
+            nk_layout_row_dynamic(ctx, 30, 1);
+            if (nk_checkbox_label(ctx, "Ctrl+B (Toggle Sidebar)", &gui_state.ctrl_b_enabled)) {
+                save_settings();
+            }
+            
+            nk_layout_row_dynamic(ctx, 30, 1);
+            if (nk_checkbox_label(ctx, "Ctrl+F (Focus Search)", &gui_state.ctrl_f_enabled)) {
+                save_settings();
+            }
+            
+            nk_layout_row_dynamic(ctx, 30, 1);
+            if (nk_checkbox_label(ctx, "Delete Key (Remove Items)", &gui_state.delete_key_enabled)) {
+                save_settings();
+            }
+        }
+        
+        nk_layout_row_dynamic(ctx, 30, 1); // Spacer
+        
+        // Action buttons
+        nk_layout_row_dynamic(ctx, 40, 3);
+        if (nk_button_label(ctx, "Apply Theme")) {
+            apply_theme();
+            save_settings();
+        }
+        if (nk_button_label(ctx, "Save Settings")) {
+            save_settings();
+        }
+        if (nk_button_label(ctx, "Close Settings")) {
+            gui_state.show_settings_page = 0;
+        }
+    }
+    nk_end(ctx);
 }
 
 void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
@@ -995,8 +1192,12 @@ void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
         nk_end(ctx);
     }
     
-    if (nk_begin(ctx, "API Kit", nk_rect(main_area_x, 0, main_area_width, height),
-                 NK_WINDOW_NO_SCROLLBAR)) {
+    // Show settings page or main API kit interface
+    if (gui_state.show_settings_page) {
+        draw_settings_page(ctx, main_area_width, height);
+    } else {
+        if (nk_begin(ctx, "API Kit", nk_rect(main_area_x, 0, main_area_width, height),
+                     NK_WINDOW_NO_SCROLLBAR)) {
         
         // Method dropdown, URL input, and Send button in same row with fixed sizes
         static const char *methods[] = {"GET", "POST", "PUT", "DELETE", "PATCH"};
@@ -1121,11 +1322,15 @@ void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
         nk_edit_string_zero_terminated(ctx, NK_EDIT_BOX | NK_EDIT_READ_ONLY, 
                                        gui_state.response, 
                                        sizeof(gui_state.response), nk_filter_default);
+        }
+            nk_end(ctx);
+        }
     }
-    nk_end(ctx);
-}
 
 int main(int argc, char *argv[]) {
+    // Load settings first
+    load_settings();
+    
     // Load saved data
     load_data();
     
