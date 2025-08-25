@@ -5,10 +5,9 @@ project(apikit)
 set(CMAKE_C_STANDARD 99)
 
 find_package(glfw3 REQUIRED)
-if(NOT glfw3_FOUND)
-    message(FATAL_ERROR "GLFW not found. Install with: brew install glfw")
-endif()
+find_package(CURL REQUIRED)
 
 add_executable(apikit main.c http_client.c)
 
-target_link_libraries(apikit PRIVATE glfw)
+target_link_libraries(apikit PRIVATE glfw ${CURL_LIBRARY})
+target_include_directories(apikit PRIVATE ${CURL_INCLUDE_DIR})

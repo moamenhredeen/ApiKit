@@ -4,6 +4,9 @@
 #include "http_client.h"
 
 int main(int argc, char *argv[]) {
+
+    http_client_t *client = http_client_create();
+
     if (!glfwInit()) {
         printf("Failed to initialize GLFW\n");
         return -1;
@@ -21,6 +24,7 @@ int main(int argc, char *argv[]) {
         glfwPollEvents();
     }
 
+    http_client_destroy(client);
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
