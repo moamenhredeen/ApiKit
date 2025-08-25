@@ -1,0 +1,46 @@
+# API Kit Sample Requests
+# This file demonstrates the HTTP file format used by API Kit
+
+### GET Request Example
+GET https://httpbin.org/get
+Accept: application/json
+User-Agent: API-Kit/1.0
+
+### POST Request with JSON Body
+POST https://httpbin.org/post
+Content-Type: application/json
+Authorization: Bearer your-token-here
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "age": 30
+}
+
+### PUT Request with Form Data
+PUT https://httpbin.org/put
+Content-Type: application/x-www-form-urlencoded
+
+name=Jane+Doe&email=jane@example.com&status=active
+
+### DELETE Request
+DELETE https://httpbin.org/delete
+Authorization: Bearer your-token-here
+
+### PATCH Request
+PATCH https://httpbin.org/patch
+Content-Type: application/json
+
+{
+  "status": "updated"
+}
+
+### Request with Query Parameters
+GET https://httpbin.org/get?param1=value1&param2=value2
+Accept: application/json
+
+### Request with Custom Headers
+GET https://httpbin.org/headers
+X-Custom-Header: Custom-Value
+X-API-Key: your-api-key-here
+Accept: application/json

@@ -1,5 +1,66 @@
-.clangd
-.vscode/
-.cache/
+# Build directories
 build/
+bin/
+lib/
+
+# Configuration files (optional, user preference)
+config.toml
+
+# Data files (optional, user preference)
 data/
+
+# IDE and editor files
+.idea/
+*.swp
+*.swo
+*~
+
+# VS Code settings (uncomment if you want to exclude them)
+# .vscode/
+
+# clangd cache
+.clangd/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Compiled Object files
+*.o
+*.obj
+
+# Executables
+*.exe
+*.out
+*.app
+apikit
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Package files
+*.dmg
+*.pkg
+*.deb
+*.rpm
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+CTestTestfile.cmake
+_deps/
+compile_commands.json
+
+# Backup files
+*.bak
+*.orig

@@ -1,0 +1,28 @@
+# API Kit Configuration Example
+# Copy this to config.toml and customize as needed
+
+[general]
+# Directory where workspaces and history are stored
+data_folder = "data"
+
+# Theme selection: 0 = Default, 1 = Dark, 2 = Light
+theme = 0
+
+[keybindings]
+# Master toggle for all keyboard shortcuts
+enabled = true
+
+# Individual shortcut toggles
+ctrl_b_enabled = true      # Toggle sidebar visibility
+ctrl_f_enabled = true      # Focus search field
+delete_key_enabled = true  # Delete selected items
+
+[ui]
+# Future UI settings can go here
+# sidebar_width = 300
+# font_size = 14
+
+[network]
+# Future network settings
+# timeout = 30
+# max_redirects = 5

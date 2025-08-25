@@ -1,22 +1,44 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(apikit)
+project(apikit VERSION 1.0.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Export compile commands for clangd/IDE support
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Project directories
+set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs")
 
 # Find required packages
 find_package(glfw3 REQUIRED)
 find_package(CURL REQUIRED)
 find_package(OpenGL REQUIRED)
 
-# tomlc99 is included as source files
+# Source files
+set(SOURCES
+    ${SRC_DIR}/main.c
+    ${SRC_DIR}/http_client.c
+    ${SRC_DIR}/http_parser.c
+)
 
-# Add executable with all source files
-add_executable(apikit
-    main.c
-    http_client.c
-    http_parser.c
-    toml.c
+# Third-party library sources
+set(THIRD_PARTY_SOURCES
+    ${LIBS_DIR}/tomlc99/toml.c
+)
+
+# Create executable
+add_executable(apikit ${SOURCES} ${THIRD_PARTY_SOURCES})
+
+# Include directories
+target_include_directories(apikit PRIVATE
+    ${INCLUDE_DIR}                    # Project headers
+    ${LIBS_DIR}/nuklear              # Nuklear GUI library
+    ${LIBS_DIR}/tomlc99              # TOML configuration library
+    ${CURL_INCLUDE_DIR}              # cURL headers
 )
 
 # Link libraries
@@ -26,13 +48,7 @@ target_link_libraries(apikit PRIVATE
     ${OPENGL_LIBRARIES}
 )
 
-# Include directories
-target_include_directories(apikit PRIVATE 
-    ${CURL_INCLUDE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}  # For nuklear.h
-)
-
-# Nuklear definitions
+# Compiler definitions for Nuklear
 target_compile_definitions(apikit PRIVATE
     NK_INCLUDE_FIXED_TYPES
     NK_INCLUDE_STANDARD_IO
@@ -44,3 +60,24 @@ target_compile_definitions(apikit PRIVATE
     NK_IMPLEMENTATION
     NK_GLFW_GL3_IMPLEMENTATION
 )
+
+# Set output directory
+set_target_properties(apikit PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Debug configuration
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(apikit PRIVATE DEBUG=1)
+    target_compile_options(apikit PRIVATE -g -Wall -Wextra)
+endif()
+
+# Create documentation target (optional)
+find_program(DOXYGEN_EXECUTABLE doxygen)
+if(DOXYGEN_EXECUTABLE)
+    add_custom_target(docs
+        COMMAND ${DOXYGEN_EXECUTABLE} Doxyfile
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating documentation with Doxygen"
+    )
+endif()
