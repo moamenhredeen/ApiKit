@@ -2,6 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <dirent.h>
 
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/gl3.h>
@@ -16,6 +19,11 @@
 // Forward declarations
 void save_data();
 void load_data();
+void ensure_data_directory();
+void ensure_default_workspace();
+void scan_and_load_workspaces();
+void move_request_to_collection(int src_workspace, int src_collection, int src_request, 
+                                int dest_workspace, int dest_collection);
 
 // History item
 typedef struct {
@@ -25,14 +33,30 @@ typedef struct {
     char timestamp[64];
 } history_item_t;
 
-// Collection item
+// Request item (individual HTTP request)
 typedef struct {
     char name[128];
     char method[10];
     char url[512];
     char headers[1024];
     char body[2048];
-} collection_item_t;
+} request_item_t;
+
+// Collection (group of requests - tree node in GUI)
+typedef struct {
+    char name[128];          // Collection name (folder name)
+    request_item_t requests[20];  // Requests in this collection
+    int request_count;
+    int expanded;            // Tree view - is this collection expanded?
+} collection_t;
+
+// Workspace (represents one .http file)
+typedef struct {
+    char name[128];          // Workspace name (also filename without .http)
+    char filename[256];      // Full filename with .http extension
+    collection_t collections[10];  // Collections within this workspace
+    int collection_count;
+} workspace_t;
 
 // GUI State
 typedef struct {
@@ -53,9 +77,23 @@ typedef struct {
     history_item_t history[100];
     int history_count;
     
-    // Collections
-    collection_item_t collections[50];
-    int collection_count;
+    // Workspaces
+    workspace_t workspaces[5];      // Max 5 workspaces
+    int workspace_count;
+    int active_workspace;           // Currently selected workspace index
+    
+    // UI state for workspace/collection management
+    char new_workspace_name[128];
+    char new_collection_name[128];
+    int show_new_workspace_popup;
+    int show_new_collection_popup;
+    
+    // Drag and drop state
+    int dragging;                    // Is a request being dragged?
+    int drag_workspace_index;        // Source workspace index
+    int drag_collection_index;       // Source collection index  
+    int drag_request_index;          // Source request index
+    char drag_preview[256];          // Text to show while dragging
 } gui_state_t;
 
 static gui_state_t gui_state = {
@@ -70,7 +108,17 @@ static gui_state_t gui_state = {
     .search_text = "",
     .active_tab = 0,
     .history_count = 0,
-    .collection_count = 0
+    .workspace_count = 0,
+    .active_workspace = 0,
+    .new_workspace_name = "",
+    .new_collection_name = "",
+    .show_new_workspace_popup = 0,
+    .show_new_collection_popup = 0,
+    .dragging = 0,
+    .drag_workspace_index = -1,
+    .drag_collection_index = -1,
+    .drag_request_index = -1,
+    .drag_preview = ""
 };
 
 // Helper functions
@@ -93,15 +141,244 @@ void add_to_history(const char* method, const char* url, long status_code) {
     }
 }
 
-void add_to_collection(const char* name, const char* method, const char* url, const char* headers, const char* body) {
-    if (gui_state.collection_count < 50) {
-        collection_item_t* item = &gui_state.collections[gui_state.collection_count];
-        strncpy(item->name, name, sizeof(item->name) - 1);
+// Helper function to ensure data directory exists
+void ensure_data_directory() {
+    struct stat st = {0};
+    if (stat("data", &st) == -1) {
+        mkdir("data", 0755);
+    }
+}
+
+// Function to extract workspace name from filename
+void extract_workspace_name(const char* filename, char* workspace_name, size_t max_len) {
+    // Remove .http extension and convert underscores to spaces
+    strncpy(workspace_name, filename, max_len - 1);
+    workspace_name[max_len - 1] = '\0';
+    
+    // Remove .http extension
+    char* ext = strstr(workspace_name, ".http");
+    if (ext) {
+        *ext = '\0';
+    }
+    
+    // Convert underscores to spaces and capitalize first letter
+    for (int i = 0; workspace_name[i]; i++) {
+        if (workspace_name[i] == '_') {
+            workspace_name[i] = ' ';
+        }
+        if (i == 0 && workspace_name[i] >= 'a' && workspace_name[i] <= 'z') {
+            workspace_name[i] -= 32; // Capitalize first letter
+        }
+    }
+}
+
+// Function to load a workspace from file
+void load_workspace_from_file(const char* filename) {
+    if (gui_state.workspace_count >= 5) return; // Max workspaces reached
+    
+    char full_path[512];
+    snprintf(full_path, sizeof(full_path), "data/%s", filename);
+    
+    workspace_t* workspace = &gui_state.workspaces[gui_state.workspace_count];
+    
+    // Extract workspace name from filename
+    extract_workspace_name(filename, workspace->name, sizeof(workspace->name));
+    strncpy(workspace->filename, full_path, sizeof(workspace->filename) - 1);
+    workspace->filename[sizeof(workspace->filename) - 1] = '\0';
+    workspace->collection_count = 0;
+    
+    // Load the workspace content
+    http_collection_t workspace_collection;
+    if (http_parse_file(full_path, &workspace_collection) == 0) {
+        // Parse requests and group them by collection name from the [Collection] prefix
+        for (int i = 0; i < workspace_collection.count; i++) {
+            const http_request_t* request = &workspace_collection.requests[i];
+            
+            // Extract collection name from request name format "[Collection] Request"
+            char collection_name[128] = "Default Collection";
+            char request_name[128];
+            
+            if (request->name[0] == '[') {
+                char* end_bracket = strchr(request->name, ']');
+                if (end_bracket) {
+                    size_t len = end_bracket - request->name - 1;
+                    if (len < sizeof(collection_name) - 1) {
+                        strncpy(collection_name, request->name + 1, len);
+                        collection_name[len] = '\0';
+                    }
+                    strncpy(request_name, end_bracket + 2, sizeof(request_name) - 1); // Skip "] "
+                } else {
+                    strncpy(request_name, request->name, sizeof(request_name) - 1);
+                }
+            } else {
+                strncpy(request_name, request->name, sizeof(request_name) - 1);
+            }
+            
+            // Find or create collection
+            collection_t* target_collection = NULL;
+            for (int c = 0; c < workspace->collection_count; c++) {
+                if (strcmp(workspace->collections[c].name, collection_name) == 0) {
+                    target_collection = &workspace->collections[c];
+                    break;
+                }
+            }
+            
+            if (!target_collection && workspace->collection_count < 10) {
+                target_collection = &workspace->collections[workspace->collection_count];
+                strncpy(target_collection->name, collection_name, sizeof(target_collection->name) - 1);
+                target_collection->name[sizeof(target_collection->name) - 1] = '\0';
+                target_collection->request_count = 0;
+                target_collection->expanded = 1;
+                workspace->collection_count++;
+            }
+            
+            // Add request to collection
+            if (target_collection && target_collection->request_count < 20) {
+                request_item_t* item = &target_collection->requests[target_collection->request_count];
+                strncpy(item->name, request_name, sizeof(item->name) - 1);
+                strncpy(item->method, request->method, sizeof(item->method) - 1);
+                strncpy(item->url, request->url, sizeof(item->url) - 1);
+                strncpy(item->headers, request->headers, sizeof(item->headers) - 1);
+                strncpy(item->body, request->body, sizeof(item->body) - 1);
+                
+                item->name[sizeof(item->name) - 1] = '\0';
+                item->method[sizeof(item->method) - 1] = '\0';
+                item->url[sizeof(item->url) - 1] = '\0';
+                item->headers[sizeof(item->headers) - 1] = '\0';
+                item->body[sizeof(item->body) - 1] = '\0';
+                
+                target_collection->request_count++;
+            }
+        }
+    }
+    
+    gui_state.workspace_count++;
+}
+
+// Scan data directory and load all workspaces
+void scan_and_load_workspaces() {
+    ensure_data_directory();
+    
+    DIR *dir = opendir("data");
+    if (dir == NULL) {
+        return;
+    }
+    
+    struct dirent *entry;
+    gui_state.workspace_count = 0; // Reset workspace count
+    
+    while ((entry = readdir(dir)) != NULL && gui_state.workspace_count < 5) {
+        // Skip . and .. entries
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        
+        // Skip history.http as it's not a workspace
+        if (strcmp(entry->d_name, "history.http") == 0) {
+            continue;
+        }
+        
+        // Only process .http files
+        if (strstr(entry->d_name, ".http") != NULL) {
+            load_workspace_from_file(entry->d_name);
+        }
+    }
+    
+    closedir(dir);
+    
+    // Ensure we have at least a default workspace
+    if (gui_state.workspace_count == 0) {
+        ensure_default_workspace();
+    }
+    
+    // Set active workspace to first one
+    gui_state.active_workspace = 0;
+}
+
+// Helper function to create a default workspace if none exists
+void ensure_default_workspace() {
+    if (gui_state.workspace_count == 0) {
+        workspace_t* workspace = &gui_state.workspaces[0];
+        strncpy(workspace->name, "Default", sizeof(workspace->name) - 1);
+        strncpy(workspace->filename, "data/default.http", sizeof(workspace->filename) - 1);
+        workspace->collection_count = 0;
+        gui_state.workspace_count = 1;
+        gui_state.active_workspace = 0;
+    }
+}
+
+// Function to move a request from one collection to another
+void move_request_to_collection(int src_workspace, int src_collection, int src_request, 
+                                int dest_workspace, int dest_collection) {
+    if (src_workspace < 0 || src_workspace >= gui_state.workspace_count ||
+        dest_workspace < 0 || dest_workspace >= gui_state.workspace_count) {
+        return;
+    }
+    
+    workspace_t* src_ws = &gui_state.workspaces[src_workspace];
+    workspace_t* dest_ws = &gui_state.workspaces[dest_workspace];
+    
+    if (src_collection < 0 || src_collection >= src_ws->collection_count ||
+        dest_collection < 0 || dest_collection >= dest_ws->collection_count) {
+        return;
+    }
+    
+    collection_t* src_col = &src_ws->collections[src_collection];
+    collection_t* dest_col = &dest_ws->collections[dest_collection];
+    
+    if (src_request < 0 || src_request >= src_col->request_count ||
+        dest_col->request_count >= 20) {
+        return;
+    }
+    
+    // Copy the request to destination
+    request_item_t* request = &src_col->requests[src_request];
+    request_item_t* dest_item = &dest_col->requests[dest_col->request_count];
+    *dest_item = *request;
+    dest_col->request_count++;
+    
+    // Remove from source by shifting remaining requests
+    for (int i = src_request; i < src_col->request_count - 1; i++) {
+        src_col->requests[i] = src_col->requests[i + 1];
+    }
+    src_col->request_count--;
+    
+    // Save the changes
+    save_data();
+}
+
+void add_to_collection(const char* collection_name, const char* request_name, const char* method, const char* url, const char* headers, const char* body) {
+    ensure_default_workspace();
+    
+    workspace_t* workspace = &gui_state.workspaces[gui_state.active_workspace];
+    
+    // Find or create collection
+    collection_t* target_collection = NULL;
+    for (int i = 0; i < workspace->collection_count; i++) {
+        if (strcmp(workspace->collections[i].name, collection_name) == 0) {
+            target_collection = &workspace->collections[i];
+            break;
+        }
+    }
+    
+    // Create new collection if not found
+    if (!target_collection && workspace->collection_count < 10) {
+        target_collection = &workspace->collections[workspace->collection_count];
+        strncpy(target_collection->name, collection_name, sizeof(target_collection->name) - 1);
+        target_collection->request_count = 0;
+        target_collection->expanded = 1;  // Expand new collections by default
+        workspace->collection_count++;
+    }
+    
+    // Add request to collection
+    if (target_collection && target_collection->request_count < 20) {
+        request_item_t* item = &target_collection->requests[target_collection->request_count];
+        strncpy(item->name, request_name, sizeof(item->name) - 1);
         strncpy(item->method, method, sizeof(item->method) - 1);
         strncpy(item->url, url, sizeof(item->url) - 1);
         strncpy(item->headers, headers, sizeof(item->headers) - 1);
         strncpy(item->body, body, sizeof(item->body) - 1);
-        gui_state.collection_count++;
+        target_collection->request_count++;
         
         // Auto-save after adding to collection
         save_data();
@@ -110,6 +387,7 @@ void add_to_collection(const char* name, const char* method, const char* url, co
 
 // Save data in HTTP file format for both collections and history
 void save_data() {
+    ensure_data_directory();
     // Save history in HTTP format
     http_collection_t history_collection;
     http_collection_clear(&history_collection);
@@ -144,42 +422,53 @@ void save_data() {
     }
     
     // Save history using parser
-    http_save_file("history.http", &history_collection);
+    http_save_file("data/history.http", &history_collection);
     
-    // Save collections in HTTP file format using parser
-    http_collection_t collection;
-    http_collection_clear(&collection);
-    
-    // Convert from GUI state to parser format
-    for (int i = 0; i < gui_state.collection_count; i++) {
-        http_request_t request;
-        collection_item_t* item = &gui_state.collections[i];
+    // Save each workspace to its own file
+    for (int w = 0; w < gui_state.workspace_count; w++) {
+        workspace_t* workspace = &gui_state.workspaces[w];
+        http_collection_t workspace_collection;
+        http_collection_clear(&workspace_collection);
+
+        // Convert all collections in this workspace to parser format
+        for (int c = 0; c < workspace->collection_count; c++) {
+            collection_t* collection = &workspace->collections[c];
+            
+            // Add all requests from this collection
+            for (int r = 0; r < collection->request_count; r++) {
+                request_item_t* item = &collection->requests[r];
+                http_request_t request;
         
-        strncpy(request.name, item->name, sizeof(request.name) - 1);
-        strncpy(request.method, item->method, sizeof(request.method) - 1);
-        strncpy(request.url, item->url, sizeof(request.url) - 1);
-        strncpy(request.headers, item->headers, sizeof(request.headers) - 1);
-        strncpy(request.body, item->body, sizeof(request.body) - 1);
-        
-        // Null terminate strings
-        request.name[sizeof(request.name) - 1] = '\0';
-        request.method[sizeof(request.method) - 1] = '\0';
-        request.url[sizeof(request.url) - 1] = '\0';
-        request.headers[sizeof(request.headers) - 1] = '\0';
-        request.body[sizeof(request.body) - 1] = '\0';
-        
-        http_collection_add(&collection, &request);
+                // Create request name with collection prefix
+                snprintf(request.name, sizeof(request.name), "[%s] %s", 
+                        collection->name, item->name);
+                strncpy(request.method, item->method, sizeof(request.method) - 1);
+                strncpy(request.url, item->url, sizeof(request.url) - 1);
+                strncpy(request.headers, item->headers, sizeof(request.headers) - 1);
+                strncpy(request.body, item->body, sizeof(request.body) - 1);
+                
+                // Null terminate strings
+                request.name[sizeof(request.name) - 1] = '\0';
+                request.method[sizeof(request.method) - 1] = '\0';
+                request.url[sizeof(request.url) - 1] = '\0';
+                request.headers[sizeof(request.headers) - 1] = '\0';
+                request.body[sizeof(request.body) - 1] = '\0';
+                
+                http_collection_add(&workspace_collection, &request);
+            }
+        }
+
+        // Save workspace to its file
+        http_save_file(workspace->filename, &workspace_collection);
     }
-    
-    // Save using parser
-    http_save_file("apikit_collection.http", &collection);
 }
 
 // Load data from files  
 void load_data() {
+    ensure_data_directory();
     // Load history from HTTP format
     http_collection_t history_collection;
-    if (http_parse_file("history.http", &history_collection) == 0) {
+    if (http_parse_file("data/history.http", &history_collection) == 0) {
         gui_state.history_count = 0;
         for (int i = 0; i < history_collection.count && i < 100; i++) {
             const http_request_t* request = &history_collection.requests[i];
@@ -222,30 +511,8 @@ void load_data() {
         }
     }
     
-    // Load collections from HTTP file using parser
-    http_collection_t collection;
-    if (http_parse_file("apikit_collection.http", &collection) == 0) {
-        gui_state.collection_count = 0;
-        for (int i = 0; i < collection.count && i < 50; i++) {
-            const http_request_t* request = &collection.requests[i];
-            collection_item_t* item = &gui_state.collections[gui_state.collection_count];
-            
-            strncpy(item->name, request->name, sizeof(item->name) - 1);
-            strncpy(item->method, request->method, sizeof(item->method) - 1);
-            strncpy(item->url, request->url, sizeof(item->url) - 1);
-            strncpy(item->headers, request->headers, sizeof(item->headers) - 1);
-            strncpy(item->body, request->body, sizeof(item->body) - 1);
-            
-            // Null terminate strings
-            item->name[sizeof(item->name) - 1] = '\0';
-            item->method[sizeof(item->method) - 1] = '\0';
-            item->url[sizeof(item->url) - 1] = '\0';
-            item->headers[sizeof(item->headers) - 1] = '\0';
-            item->body[sizeof(item->body) - 1] = '\0';
-            
-            gui_state.collection_count++;
-        }
-    }
+    // Scan and load all workspaces from data directory
+    scan_and_load_workspaces();
 }
 
 
@@ -332,39 +599,237 @@ void draw_sidebar(struct nk_context *ctx, int sidebar_width, int height) {
                                        gui_state.method_selected == 2 ? "PUT" :
                                        gui_state.method_selected == 3 ? "DELETE" : "PATCH";
                     
-                    add_to_collection(name, method, gui_state.url, gui_state.headers, gui_state.body);
+                    add_to_collection("Default Collection", name, method, gui_state.url, gui_state.headers, gui_state.body);
                 }
                 
-                for (int i = 0; i < gui_state.collection_count; i++) {
-                    collection_item_t* item = &gui_state.collections[i];
+                // Display workspace dropdown with add button
+                if (gui_state.workspace_count > 0) {
+                    workspace_t* current_workspace = &gui_state.workspaces[gui_state.active_workspace];
                     
-                    // Filter by search
-                    if (strlen(gui_state.search_text) > 0 && 
-                        !strstr(item->name, gui_state.search_text) && 
-                        !strstr(item->url, gui_state.search_text)) {
-                        continue;
+                    nk_layout_row_begin(ctx, NK_DYNAMIC, 25, 2);
+                    nk_layout_row_push(ctx, 0.8f);
+                    if (nk_combo_begin_label(ctx, current_workspace->name, nk_vec2(nk_widget_width(ctx), 200))) {
+                        for (int w = 0; w < gui_state.workspace_count; w++) {
+                            if (nk_combo_item_label(ctx, gui_state.workspaces[w].name, NK_TEXT_LEFT)) {
+                                gui_state.active_workspace = w;
+                            }
+                        }
+                        nk_combo_end(ctx);
+                    }
+                    nk_layout_row_push(ctx, 0.2f);
+                    if (nk_button_label(ctx, "+W")) {
+                        gui_state.show_new_workspace_popup = 1;
+                        strcpy(gui_state.new_workspace_name, "");
+                    }
+                    nk_layout_row_end(ctx);
+                } else {
+                    // No workspaces yet, show create button
+                    nk_layout_row_dynamic(ctx, 25, 1);
+                    if (nk_button_label(ctx, "Create Workspace")) {
+                        gui_state.show_new_workspace_popup = 1;
+                        strcpy(gui_state.new_workspace_name, "");
+                    }
+                }
+                
+                // Show workspace creation dialog if needed
+                if (gui_state.show_new_workspace_popup) {
+                    nk_layout_row_dynamic(ctx, 5, 1); // Spacer
+                    nk_layout_row_dynamic(ctx, 20, 1);
+                    nk_label(ctx, "Create New Workspace:", NK_TEXT_LEFT);
+                    
+                    nk_layout_row_dynamic(ctx, 25, 1);
+                    nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, gui_state.new_workspace_name, 
+                                                 sizeof(gui_state.new_workspace_name), nk_filter_default);
+                    
+                    nk_layout_row_dynamic(ctx, 25, 2);
+                    if (nk_button_label(ctx, "Create")) {
+                        if (strlen(gui_state.new_workspace_name) > 0 && gui_state.workspace_count < 5) {
+                            workspace_t* workspace = &gui_state.workspaces[gui_state.workspace_count];
+                            strncpy(workspace->name, gui_state.new_workspace_name, sizeof(workspace->name) - 1);
+                            workspace->name[sizeof(workspace->name) - 1] = '\0';
+                            
+                            // Create filename from name (replace spaces with underscores, add .http)
+                            char safe_name[128];
+                            strncpy(safe_name, gui_state.new_workspace_name, sizeof(safe_name) - 1);
+                            safe_name[sizeof(safe_name) - 1] = '\0';
+                            for (int i = 0; safe_name[i]; i++) {
+                                if (safe_name[i] == ' ') safe_name[i] = '_';
+                                if (safe_name[i] >= 'A' && safe_name[i] <= 'Z') safe_name[i] += 32; // lowercase
+                            }
+                            snprintf(workspace->filename, sizeof(workspace->filename), "data/%s.http", safe_name);
+                            
+                            workspace->collection_count = 0;
+                            gui_state.workspace_count++;
+                            gui_state.active_workspace = gui_state.workspace_count - 1;
+                            
+                            save_data(); // Save the new workspace
+                        }
+                        gui_state.show_new_workspace_popup = 0;
+                    }
+                    if (nk_button_label(ctx, "Cancel")) {
+                        gui_state.show_new_workspace_popup = 0;
                     }
                     
-                    nk_layout_row_dynamic(ctx, 40, 1);
-                    if (nk_button_label(ctx, item->name)) {
-                        // Load this collection item
-                        strncpy(gui_state.url, item->url, sizeof(gui_state.url));
-                        strncpy(gui_state.headers, item->headers, sizeof(gui_state.headers));
-                        strncpy(gui_state.body, item->body, sizeof(gui_state.body));
+                    nk_layout_row_dynamic(ctx, 10, 1); // Spacer
+                }
+                
+                // Show collection management only if we have a workspace
+                if (gui_state.workspace_count > 0) {
+                    workspace_t* current_workspace = &gui_state.workspaces[gui_state.active_workspace];
+                    
+                    // Show collection creation dialog if needed
+                    if (gui_state.show_new_collection_popup) {
+                        nk_layout_row_dynamic(ctx, 5, 1); // Spacer
+                        nk_layout_row_dynamic(ctx, 20, 1);
+                        nk_label(ctx, "Create New Collection:", NK_TEXT_LEFT);
                         
-                        // Set method
-                        if (strcmp(item->method, "GET") == 0) gui_state.method_selected = 0;
-                        else if (strcmp(item->method, "POST") == 0) gui_state.method_selected = 1;
-                        else if (strcmp(item->method, "PUT") == 0) gui_state.method_selected = 2;
-                        else if (strcmp(item->method, "DELETE") == 0) gui_state.method_selected = 3;
-                        else if (strcmp(item->method, "PATCH") == 0) gui_state.method_selected = 4;
+                        nk_layout_row_dynamic(ctx, 25, 1);
+                        nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, gui_state.new_collection_name, 
+                                                     sizeof(gui_state.new_collection_name), nk_filter_default);
+                        
+                        nk_layout_row_dynamic(ctx, 25, 2);
+                        if (nk_button_label(ctx, "Create")) {
+                            if (strlen(gui_state.new_collection_name) > 0) {
+                                if (current_workspace->collection_count < 10) {
+                                    collection_t* collection = &current_workspace->collections[current_workspace->collection_count];
+                                    strncpy(collection->name, gui_state.new_collection_name, sizeof(collection->name) - 1);
+                                    collection->name[sizeof(collection->name) - 1] = '\0';
+                                    collection->request_count = 0;
+                                    collection->expanded = 1;
+                                    current_workspace->collection_count++;
+                                    
+                                    save_data(); // Save the updated workspace
+                                }
+                            }
+                            gui_state.show_new_collection_popup = 0;
+                        }
+                        if (nk_button_label(ctx, "Cancel")) {
+                            gui_state.show_new_collection_popup = 0;
+                        }
+                        
+                        nk_layout_row_dynamic(ctx, 10, 1); // Spacer
+                    }
+                    
+                    nk_layout_row_dynamic(ctx, 5, 1); // Small spacer
+                    
+                    // Add collection button
+                    if (!gui_state.show_new_collection_popup) {
+                        nk_layout_row_dynamic(ctx, 25, 1);
+                        if (nk_button_label(ctx, "+ Add Collection")) {
+                            gui_state.show_new_collection_popup = 1;
+                            strcpy(gui_state.new_collection_name, "");
+                        }
+                    }
+                    
+                    nk_layout_row_dynamic(ctx, 5, 1); // Small spacer
+                    
+                    // Display collections as tree
+                    for (int c = 0; c < current_workspace->collection_count; c++) {
+                        collection_t* collection = &current_workspace->collections[c];
+                        
+                        // Collection header (expandable)
+                        nk_layout_row_dynamic(ctx, 25, 1);
+                        
+                        // Check for drop zone
+                        struct nk_rect collection_bounds = nk_widget_bounds(ctx);
+                        int is_drop_target = gui_state.dragging && 
+                                           nk_input_is_mouse_hovering_rect(&ctx->input, collection_bounds);
+                        
+                        // Highlight drop zone with a colored label
+                        char collection_label[256];
+                        if (is_drop_target) {
+                            snprintf(collection_label, sizeof(collection_label), "→ %s (Drop Here)", collection->name);
+                        } else {
+                            strncpy(collection_label, collection->name, sizeof(collection_label) - 1);
+                            collection_label[sizeof(collection_label) - 1] = '\0';
+                        }
+                        
+                        if (nk_tree_push_id(ctx, NK_TREE_NODE, collection_label, NK_MINIMIZED, c)) {
+                            collection->expanded = 1;
+                            
+                            // Handle drop
+                            if (is_drop_target && nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT) && gui_state.dragging) {
+                                // Only move if dropping to a different collection
+                                if (!(gui_state.drag_workspace_index == gui_state.active_workspace && 
+                                      gui_state.drag_collection_index == c)) {
+                                    move_request_to_collection(gui_state.drag_workspace_index, 
+                                                             gui_state.drag_collection_index, 
+                                                             gui_state.drag_request_index,
+                                                             gui_state.active_workspace, c);
+                                }
+                                gui_state.dragging = 0;
+                            }
+                            
+                            // Display requests in this collection
+                            for (int r = 0; r < collection->request_count; r++) {
+                                request_item_t* item = &collection->requests[r];
+                    
+                                // Filter by search
+                                if (strlen(gui_state.search_text) > 0 && 
+                                    !strstr(item->name, gui_state.search_text) && 
+                                    !strstr(item->url, gui_state.search_text)) {
+                                    continue;
+                                }
+                                
+                                nk_layout_row_dynamic(ctx, 30, 1);
+                                char button_text[256];
+                                snprintf(button_text, sizeof(button_text), "%s %s", item->method, item->name);
+                                
+                                // Check for button press and drag
+                                struct nk_rect button_bounds = nk_widget_bounds(ctx);
+                                if (nk_button_label(ctx, button_text)) {
+                                    // Load this collection item
+                                    strncpy(gui_state.url, item->url, sizeof(gui_state.url));
+                                    strncpy(gui_state.headers, item->headers, sizeof(gui_state.headers));
+                                    strncpy(gui_state.body, item->body, sizeof(gui_state.body));
+                                    
+                                    // Set method
+                                    if (strcmp(item->method, "GET") == 0) gui_state.method_selected = 0;
+                                    else if (strcmp(item->method, "POST") == 0) gui_state.method_selected = 1;
+                                    else if (strcmp(item->method, "PUT") == 0) gui_state.method_selected = 2;
+                                    else if (strcmp(item->method, "DELETE") == 0) gui_state.method_selected = 3;
+                                    else if (strcmp(item->method, "PATCH") == 0) gui_state.method_selected = 4;
+                                }
+                                
+                                // Check for drag start
+                                if (nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT) && 
+                                    nk_input_is_mouse_hovering_rect(&ctx->input, button_bounds) &&
+                                    !gui_state.dragging) {
+                                    // Start drag
+                                    gui_state.dragging = 1;
+                                    gui_state.drag_workspace_index = gui_state.active_workspace;
+                                    gui_state.drag_collection_index = c;
+                                    gui_state.drag_request_index = r;
+                                    snprintf(gui_state.drag_preview, sizeof(gui_state.drag_preview), 
+                                            "Moving: %s", button_text);
+                                }
+                            }
+                            nk_tree_pop(ctx);
+                        }
                     }
                 }
             }
             nk_group_end(ctx);
         }
     }
+    
+    // Handle drag cancellation (mouse released outside drop zones)
+    if (gui_state.dragging && nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT)) {
+        gui_state.dragging = 0;
+    }
+    
+    // Draw drag preview
+    if (gui_state.dragging) {
+        struct nk_vec2 mouse_pos = ctx->input.mouse.pos;
+        nk_layout_space_begin(ctx, NK_STATIC, 20, 1);
+        nk_layout_space_push(ctx, nk_rect(mouse_pos.x + 10, mouse_pos.y - 10, 200, 20));
+        nk_label_colored(ctx, gui_state.drag_preview, NK_TEXT_LEFT, nk_rgb(255, 255, 0));
+        nk_layout_space_end(ctx);
+    }
+    
     nk_end(ctx);
+    
+
 }
 
 void draw_postman_gui(struct nk_context *ctx, http_client_t *client) {
