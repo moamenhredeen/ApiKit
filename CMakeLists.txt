@@ -211,16 +211,5 @@ set_tests_properties(SimpleClientTests PROPERTIES
 
 
 
-# Test data setup
-add_custom_command(TARGET test_http_parser POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${TEST_DIR}/fixtures ${CMAKE_BINARY_DIR}/tests/fixtures
-    COMMENT "Copying test fixtures"
-)
 
-add_custom_command(TARGET test_http_client POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-    ${CMAKE_BINARY_DIR}/tests/output
-    COMMENT "Creating test output directory"
-)
 
