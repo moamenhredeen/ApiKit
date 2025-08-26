@@ -91,6 +91,14 @@ http_response_t *http_request(
     if (!response) {
         return NULL;
     }
+    
+    // Explicitly initialize fields
+    response->body = NULL;
+    response->headers = NULL;
+    response->error_message = NULL;
+    response->body_size = 0;
+    response->headers_size = 0;
+    response->status_code = 0;
 
     response->body = malloc(1);
     response->headers = malloc(1);
@@ -98,6 +106,10 @@ http_response_t *http_request(
         http_response_free(response);
         return NULL;
     }
+    response->body[0] = '\0';
+    response->headers[0] = '\0';
+    response->body_size = 0;
+    response->headers_size = 0;
 
     // Basic curl options
     curl_easy_setopt(client->curl, CURLOPT_URL, url);
@@ -164,8 +176,8 @@ http_response_t *http_request(
     // Get response code
     curl_easy_getinfo(client->curl, CURLINFO_RESPONSE_CODE, &response->status_code);
 
-    // Handle curl errors
-    if (res != CURLE_OK) {
+    // Handle curl errors - but ignore certain non-critical errors
+    if (res != CURLE_OK && res != CURLE_PARTIAL_FILE) {
         response->error_message = strdup(curl_easy_strerror(res));
     }
 
@@ -175,8 +187,17 @@ http_response_t *http_request(
 void http_response_free(http_response_t *response) {
     if (!response) return;
     
-    free(response->body);
-    free(response->headers);
-    free(response->error_message);
+    if (response->body) {
+        free(response->body);
+        response->body = NULL;
+    }
+    if (response->headers) {
+        free(response->headers);
+        response->headers = NULL;
+    }
+    if (response->error_message) {
+        free(response->error_message);
+        response->error_message = NULL;
+    }
     free(response);
 }

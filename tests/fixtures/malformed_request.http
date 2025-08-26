@@ -1,0 +1,18 @@
+# This file contains intentionally malformed requests for testing error handling
+
+### Missing URL
+POST
+Content-Type: application/json
+
+{"data": "test"}
+
+---
+
+### Invalid Method
+INVALID_METHOD https://api.example.com/test
+
+---
+
+### Incomplete Request
+GET https://api.example.com/incomplete
+

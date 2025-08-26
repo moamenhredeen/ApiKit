@@ -1,0 +1,57 @@
+### Complex API Collection
+
+### Authentication Request
+POST https://auth.example.com/login
+Content-Type: application/json
+
+{
+  "username": "testuser",
+  "password": "testpass"
+}
+
+---
+
+### Get User Profile
+GET https://api.example.com/user/profile
+Authorization: Bearer {{token}}
+Accept: application/json
+
+---
+
+### Update User Settings
+PATCH https://api.example.com/user/settings
+Content-Type: application/json
+Authorization: Bearer {{token}}
+X-Request-ID: req-123
+
+{
+  "theme": "dark",
+  "notifications": {
+    "email": true,
+    "push": false
+  },
+  "privacy": {
+    "profileVisible": true
+  }
+}
+
+---
+
+### Delete User Account
+DELETE https://api.example.com/user/account
+Authorization: Bearer {{token}}
+X-Confirm-Action: true
+
+---
+
+### File Upload
+POST https://api.example.com/files/upload
+Content-Type: multipart/form-data
+Authorization: Bearer {{token}}
+
+--boundary123
+Content-Disposition: form-data; name="file"; filename="test.txt"
+Content-Type: text/plain
+
+Test file content
+--boundary123--

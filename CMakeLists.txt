@@ -104,3 +104,123 @@ endif()
 
 file(COPY resources DESTINATION ${CMAKE_BINARY_DIR})
 
+#-------------------------------------------------------
+# Testing Configuration
+#-------------------------------------------------------
+
+# Enable testing
+enable_testing()
+
+# Test directories
+set(TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+set(TEST_UNITY_DIR "${TEST_DIR}/unity")
+
+# Unity test framework sources
+set(UNITY_SOURCES
+    ${TEST_UNITY_DIR}/unity.c
+)
+
+# Library for shared functionality (exclude main.c)
+set(LIB_SOURCES
+    ${SRC_DIR}/http_client.c
+    ${SRC_DIR}/http_parser.c
+)
+
+# Create a library for testing (without main.c)
+add_library(apikit_lib STATIC ${LIB_SOURCES} ${THIRD_PARTY_SOURCES})
+
+target_include_directories(apikit_lib PUBLIC
+    ${INCLUDE_DIR}
+    ${LIBS_DIR}/nuklear
+    ${LIBS_DIR}/tomlc99
+    ${CURL_INCLUDE_DIR}
+)
+
+target_link_libraries(apikit_lib PUBLIC 
+    ${CURL_LIBRARY}
+)
+
+# Test executable for HTTP parser
+add_executable(test_http_parser
+    ${TEST_DIR}/test_http_parser.c
+    ${UNITY_SOURCES}
+)
+
+target_include_directories(test_http_parser PRIVATE
+    ${INCLUDE_DIR}
+    ${TEST_DIR}
+)
+
+target_link_libraries(test_http_parser PRIVATE
+    apikit_lib
+)
+
+# Test executable for HTTP client
+add_executable(test_http_client
+    ${TEST_DIR}/test_http_client.c
+    ${UNITY_SOURCES}
+)
+
+target_include_directories(test_http_client PRIVATE
+    ${INCLUDE_DIR}
+    ${TEST_DIR}
+)
+
+target_link_libraries(test_http_client PRIVATE
+    apikit_lib
+    pthread  # Required for threading in HTTP client tests
+)
+
+# Simple HTTP client test (without mock server)
+add_executable(test_simple_client
+    ${TEST_DIR}/test_simple_client.c
+    ${UNITY_SOURCES}
+)
+
+target_include_directories(test_simple_client PRIVATE
+    ${INCLUDE_DIR}
+    ${TEST_DIR}
+)
+
+target_link_libraries(test_simple_client PRIVATE
+    apikit_lib
+)
+
+# Add tests to CTest
+add_test(NAME HttpParserTests COMMAND test_http_parser)
+add_test(NAME HttpClientTests COMMAND test_http_client)
+add_test(NAME SimpleClientTests COMMAND test_simple_client)
+
+# Set test properties
+set_tests_properties(HttpParserTests PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 30
+)
+
+set_tests_properties(HttpClientTests PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 60
+)
+
+set_tests_properties(SimpleClientTests PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    TIMEOUT 30
+)
+
+
+
+
+
+# Test data setup
+add_custom_command(TARGET test_http_parser POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${TEST_DIR}/fixtures ${CMAKE_BINARY_DIR}/tests/fixtures
+    COMMENT "Copying test fixtures"
+)
+
+add_custom_command(TARGET test_http_client POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+    ${CMAKE_BINARY_DIR}/tests/output
+    COMMENT "Creating test output directory"
+)
+

@@ -1,0 +1,28 @@
+### Simple GET Request
+GET https://api.example.com/users
+
+---
+
+### POST Request with JSON
+POST https://api.example.com/users
+Content-Type: application/json
+Authorization: Bearer token123
+
+{
+  "name": "John Doe",
+  "email": "john@example.com"
+}
+
+---
+
+### PUT Request with Headers
+PUT https://api.example.com/users/123
+Content-Type: application/json
+X-Custom-Header: custom-value
+Authorization: Bearer token456
+
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "active": true
+}
