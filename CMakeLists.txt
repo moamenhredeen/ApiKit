@@ -23,6 +23,7 @@ set(SOURCES
     ${SRC_DIR}/main.c
     ${SRC_DIR}/http_client.c
     ${SRC_DIR}/http_parser.c
+    ${SRC_DIR}/store.c
 )
 
 # Third-party library sources
@@ -124,6 +125,7 @@ set(UNITY_SOURCES
 set(LIB_SOURCES
     ${SRC_DIR}/http_client.c
     ${SRC_DIR}/http_parser.c
+    ${SRC_DIR}/store.c
 )
 
 # Create a library for testing (without main.c)
