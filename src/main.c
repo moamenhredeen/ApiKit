@@ -11,6 +11,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <stdbool.h>
 
 #define GL_SILENCE_DEPRECATION
 #include <OpenGL/gl3.h>
@@ -20,7 +21,6 @@
 #include "nuklear_glfw_gl3.h"
 
 #include "http_client.h"
-#include "http_parser.h"
 #include "store.h"
 
 /* ============================================================================
@@ -49,22 +49,17 @@ static void ui_drag_preview(struct nk_context *ctx);
 // Theme and styling
 static void apply_theme(void);
 
+
 /* ============================================================================
  * UTILITY FUNCTIONS
  * ============================================================================ */
-
-
-
-
-
-
-
-
 
 static void apply_theme(void) {
     // Theme application would go here
     // For now, we just store the preference
 }
+
+
 
 /* ============================================================================
  * INPUT HANDLING
@@ -77,9 +72,9 @@ static void handle_keyboard_shortcuts(struct nk_context *ctx) {
     struct nk_input *input = &ctx->input;
     
     // Delete key: Delete selected item
-    if (state->settings.delete_key_enabled && nk_input_is_key_pressed(input, NK_KEY_DEL)) {
-        store_delete_selected_item();
-    }
+    // if (state->settings.delete_key_enabled && nk_input_is_key_pressed(input, NK_KEY_DEL)) {
+    //     store_delete_selected_item();
+    // }
     
     // Use GLFW for reliable key detection since Nuklear's text input is inconsistent
     GLFWwindow* window = glfwGetCurrentContext();
@@ -92,7 +87,8 @@ static void handle_keyboard_shortcuts(struct nk_context *ctx) {
         // Check letter keys
         int b_pressed = glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS;
         int f_pressed = glfwGetKey(window, GLFW_KEY_F) == GLFW_PRESS;
-        
+
+    
         // Ctrl+B combination
         if (state->settings.ctrl_b_enabled) {
             int ctrl_b_combo = ctrl_pressed && b_pressed;
@@ -108,7 +104,6 @@ static void handle_keyboard_shortcuts(struct nk_context *ctx) {
             if (ctrl_f_combo && !state->keyboard.prev_ctrl_f_combo) {
                 state->show_sidebar = 1;
                 state->active_tab = 1; // Switch to collections tab
-                state->search_has_focus = 1;
             }
             state->keyboard.prev_ctrl_f_combo = ctrl_f_combo;
         }
@@ -127,37 +122,33 @@ static void handle_keyboard_shortcuts(struct nk_context *ctx) {
 
 static void ui_sidebar(struct nk_context *ctx, int width, int height) {
     app_state_t* state = store_get_state();
-    
-    if (nk_begin(ctx, "Sidebar", nk_rect(0, 0, width, height),
-                 NK_WINDOW_NO_SCROLLBAR | NK_WINDOW_BORDER)) {
-        
-        // Toggle button at top
-        nk_layout_row_static(ctx, 30, width - 20, 1);
-        if (nk_button_label(ctx, "◀")) {
-            state->show_sidebar = 0;
-        }
-        
+
+		nk_flags sidebar_flags =  NK_WINDOW_NO_SCROLLBAR;
+    if (nk_begin(ctx, "Sidebar", nk_rect(0, 0, width, height), sidebar_flags)) {
+
+    		ui_workspace_dropdown(ctx);
+
         // Search field
-        nk_layout_row_static(ctx, 25, width - 20, 1);
-        nk_flags edit_flags = NK_EDIT_FIELD;
-        if (state->search_has_focus) {
-            edit_flags |= NK_EDIT_AUTO_SELECT;
-            state->search_has_focus = 0; // Reset after one frame
-        }
-        nk_edit_string_zero_terminated(ctx, edit_flags, state->search_text, 
-                                       sizeof(state->search_text), nk_filter_default);
+        nk_layout_row_static(ctx, 25, width, 1);
+        nk_edit_string_zero_terminated(ctx,
+                                       NK_EDIT_FIELD,
+                                       state->search_text, 
+                                       sizeof(state->search_text),
+                                       nk_filter_default);
         
         // Tabs
-        nk_layout_row_static(ctx, 30, (width - 20) / 2, 2);
-        if (nk_button_label(ctx, state->active_tab == 0 ? "[History]" : "History")) {
+        nk_layout_row_dynamic(ctx, 30, 2);
+        const char *history_tab_text = state->active_tab == 0 ? "[History]" : "History";
+        if (nk_button_label(ctx, history_tab_text)) {
             state->active_tab = 0;
         }
-        if (nk_button_label(ctx, state->active_tab == 1 ? "[collection_ts]" : "collection_ts")) {
+        const char *collections_tab_text = state->active_tab == 1 ? "[collection_ts]" : "collection_ts";
+        if (nk_button_label(ctx, collections_tab_text)) {
             state->active_tab = 1;
         }
         
         // Tab content (reduced height to make room for settings button and help)
-        nk_layout_row_dynamic(ctx, height - 175, 1);
+        nk_layout_row_dynamic(ctx, height, 1);
         if (nk_group_begin(ctx, "tab_content", NK_WINDOW_BORDER)) {
             if (state->active_tab == 0) {
                 ui_history_tab(ctx);
@@ -166,26 +157,25 @@ static void ui_sidebar(struct nk_context *ctx, int width, int height) {
             }
             nk_group_end(ctx);
         }
+
+				// Handle drag cancellation
+				if (state->drag.active && nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT)) {
+						state->drag.active = 0;
+				}
+				
+				// Draw drag preview
+				ui_drag_preview(ctx);
+				
+				// settings_t button at bottom
+				nk_layout_row_dynamic(ctx, 30, 1);
+				if (nk_button_label(ctx, "Settings")) {
+						if (state->route == ROUTE_SETTINGS) {
+								state->route = ROUTE_MAIN;
+						} else {
+								state->route = ROUTE_SETTINGS;
+						}
+				}
     }
-    
-    // Handle drag cancellation
-    if (state->drag.active && nk_input_is_mouse_released(&ctx->input, NK_BUTTON_LEFT)) {
-        state->drag.active = 0;
-    }
-    
-    // Draw drag preview
-    ui_drag_preview(ctx);
-    
-    // settings_t button at bottom
-    nk_layout_row_dynamic(ctx, 35, 1);
-    if (nk_button_label(ctx, "⚙ settings_t")) {
-        state->show_settings_page = !state->show_settings_page;
-    }
-    
-    // Show keyboard shortcuts help at bottom
-    nk_layout_row_dynamic(ctx, 15, 1);
-    nk_label(ctx, "Keys: Ctrl+B=Toggle Sidebar | Ctrl+F=Search | Del=Delete | Right-click=Select", NK_TEXT_CENTERED);
-    
     nk_end(ctx);
 }
 
@@ -262,36 +252,34 @@ static void ui_collections_tab(struct nk_context *ctx) {
 }
 
 static void ui_workspace_dropdown(struct nk_context *ctx) {
-    app_state_t* state = store_get_state();
-    
-    // Display workspace dropdown with add button
-    if (state->workspace_count > 0) {
-        workspace_t* current_workspace = &state->workspaces[state->active_workspace];
-                    
-                    nk_layout_row_begin(ctx, NK_DYNAMIC, 25, 2);
-                    nk_layout_row_push(ctx, 0.8f);
-                    if (nk_combo_begin_label(ctx, current_workspace->name, nk_vec2(nk_widget_width(ctx), 200))) {
-                        for (int w = 0; w < state->workspace_count; w++) {
-                            if (nk_combo_item_label(ctx, state->workspaces[w].name, NK_TEXT_LEFT)) {
-                                state->active_workspace = w;
-                            }
-                        }
-                        nk_combo_end(ctx);
-                    }
-                    nk_layout_row_push(ctx, 0.2f);
-                    if (nk_button_label(ctx, "+W")) {
-                        state->show_new_workspace_popup = 1;
-                        strcpy(state->new_workspace_name, "");
-                    }
-                    nk_layout_row_end(ctx);
-                } else {
-                    // No workspaces yet, show create button
-                    nk_layout_row_dynamic(ctx, 25, 1);
-                    if (nk_button_label(ctx, "Create workspace_t")) {
-                        state->show_new_workspace_popup = 1;
-                        strcpy(state->new_workspace_name, "");
-                    }
-                }
+	app_state_t* state = store_get_state();
+	if (state->workspace_count > 0) {
+		workspace_t* current_workspace = &state->workspaces[state->active_workspace];
+
+		nk_layout_row_begin(ctx, NK_DYNAMIC, 25, 2);
+		nk_layout_row_push(ctx, 0.8f);
+		if (nk_combo_begin_label(ctx, current_workspace->name, nk_vec2(nk_widget_width(ctx), 200))) {
+			for (int w = 0; w < state->workspace_count; w++) {
+				if (nk_combo_item_label(ctx, state->workspaces[w].name, NK_TEXT_LEFT)) {
+					state->active_workspace = w;
+				}
+			}
+			nk_combo_end(ctx);
+		}
+		nk_layout_row_push(ctx, 0.2f);
+		if (nk_button_label(ctx, "+")) {
+			state->show_new_workspace_popup = 1;
+			strcpy(state->new_workspace_name, "");
+		}
+		nk_layout_row_end(ctx);
+	} else {
+		// No workspaces yet, show create button
+		nk_layout_row_dynamic(ctx, 25, 1);
+		if (nk_button_label(ctx, "Create Workspace")) {
+			state->show_new_workspace_popup = 1;
+			strcpy(state->new_workspace_name, "");
+		}
+	}
 }
 
 static void ui_collection_tree(struct nk_context *ctx) {
@@ -402,13 +390,13 @@ static void ui_main_panel(struct nk_context *ctx, http_client_t *client, int x, 
         nk_layout_row_push(ctx, 100);  // Fixed 100px for dropdown
         state->method_selected = nk_combo(ctx, methods, 5, state->method_selected, 25, nk_vec2(120, 200));
         nk_layout_row_push(ctx, width - 180);  // Remaining space minus button and dropdown
-        nk_flags url_flags = NK_EDIT_FIELD;
-        if (nk_widget_has_mouse_click_down(ctx, NK_BUTTON_LEFT, nk_true)) {
-            state->url_has_focus = 1;
-        }
-        nk_edit_string_zero_terminated(ctx, url_flags, state->url, 
-                                       sizeof(state->url), nk_filter_default);
-        nk_layout_row_push(ctx, 80);  // Fixed 80px for send button
+        nk_edit_string_zero_terminated(ctx,
+                                       NK_EDIT_FIELD,
+                                       state->url, 
+                                       sizeof(state->url),
+                                       nk_filter_default);
+
+        nk_layout_row_push(ctx, 80);
         if (nk_button_label(ctx, "SEND") && !state->request_in_progress) {
             state->request_in_progress = 1;
             
@@ -528,10 +516,11 @@ static void draw_ui(struct nk_context *ctx, http_client_t *client) {
     app_state_t* state = store_get_state();
     
     // Handle keyboard shortcuts first
-    handle_keyboard_shortcuts(ctx);
+    // handle_keyboard_shortcuts(ctx);
     
     // Get window size
-    int width, height;
+    int width = 0.0F;
+		int height = 0.0F;
     glfwGetWindowSize(glfwGetCurrentContext(), &width, &height);
     
     int main_area_x = state->show_sidebar ? SIDEBAR_WIDTH : 0;
@@ -543,21 +532,24 @@ static void draw_ui(struct nk_context *ctx, http_client_t *client) {
     }
     
     // Toggle button when sidebar is hidden
-    if (!state->show_sidebar) {
-        if (nk_begin(ctx, "ToggleBtn", nk_rect(5, 5, 40, 30), NK_WINDOW_NO_SCROLLBAR)) {
-            nk_layout_row_static(ctx, 25, 35, 1);
-            if (nk_button_label(ctx, "▶")) {
-                state->show_sidebar = 1;
-            }
-        }
-        nk_end(ctx);
-    }
+    // if (!state->show_sidebar) {
+    //     if (nk_begin(ctx, "ToggleBtn", nk_rect(5, 5, 40, 30), NK_WINDOW_NO_SCROLLBAR)) {
+    //         nk_layout_row_static(ctx, 25, 35, 1);
+    //         if (nk_button_label(ctx, "▶")) {
+    //             state->show_sidebar = 1;
+    //         }
+    //     }
+    //     nk_end(ctx);
+    // }
     
-    // Show settings page or main API interface
-    if (state->show_settings_page) {
-        ui_settings_page(ctx, main_area_x, main_area_width, height);
-    } else {
-        ui_main_panel(ctx, client, main_area_x, main_area_width, height);
+    // routing
+    switch(state->route){
+        case ROUTE_MAIN:
+            ui_main_panel(ctx, client, main_area_x, main_area_width, height);
+        break;
+        case ROUTE_SETTINGS:
+            ui_settings_page(ctx, main_area_x, main_area_width, height);
+        break;        
     }
 }
 
@@ -634,6 +626,7 @@ int main() {
         
         int width = 0;
         int height = 0;
+
         glfwGetFramebufferSize(window, &width, &height);
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT);

@@ -19,6 +19,7 @@
  * ============================================================================ */
 
 static app_state_t app_state = {
+    .route = ROUTE_MAIN,
     .url = "https://httpbin.org/get",
     .headers = "Content-Type: application/json\nAuthorization: Bearer your-token",
     .body = "{\n  \"message\": \"Hello from API Kit!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}",
@@ -30,8 +31,6 @@ static app_state_t app_state = {
     .show_settings_page = 0,
     .search_text = "",
     .active_tab = 0,
-    .search_has_focus = 0,
-    .url_has_focus = 0,
     .history_count = 0,
     .workspace_count = 0,
     .active_workspace = 0,

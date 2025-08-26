@@ -90,6 +90,13 @@ typedef struct {
     int delete_key_enabled;
 } settings_t;
 
+
+typedef enum {
+  ROUTE_MAIN,
+  ROUTE_SETTINGS
+} routes_t;
+
+
 // Main application state (Svelte-like store)
 typedef struct {
     // Current request data
@@ -106,8 +113,6 @@ typedef struct {
     int show_settings_page;
     char search_text[256];
     int active_tab;  // 0 = history, 1 = collections
-    int search_has_focus;
-    int url_has_focus;
     
     // Data
     history_item_t history[MAX_HISTORY_ITEMS];
@@ -127,6 +132,8 @@ typedef struct {
     selection_t selection;
     keyboard_state_t keyboard;
     settings_t settings;
+
+    routes_t route;
 } app_state_t;
 
 /* ============================================================================
