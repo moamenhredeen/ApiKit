@@ -39,9 +39,9 @@
 
 // HTTP request history item
 typedef struct {
-    char method[10];
     char url[512];
     long status_code;
+    char method[10];
     char timestamp[64];
 } history_item_t;
 
@@ -57,17 +57,17 @@ typedef struct {
 // collection_t of requests (tree node in GUI)
 typedef struct {
     char name[128];
-    request_item_t requests[MAX_REQUESTS_PER_COLLECTION];
     int request_count;
     int expanded;
+    request_item_t requests[MAX_REQUESTS_PER_COLLECTION];
 } collection_t;
 
 // workspace_t containing collections
 typedef struct {
     char name[128];
     char filename[256];
-    collection_t collections[MAX_COLLECTIONS_PER_WORKSPACE];
     int collection_count;
+    collection_t collections[MAX_COLLECTIONS_PER_WORKSPACE];
 } workspace_t;
 
 // Drag and drop state
