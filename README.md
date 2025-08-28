@@ -109,7 +109,3 @@ delete_key_enabled = true
 - **GLFW**: Window and input management
 - **cURL**: HTTP client functionality
 - **tomlc99**: TOML configuration parsing
-
-## License
-
-[Add your license here]
